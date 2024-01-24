@@ -7,14 +7,42 @@ This is a golang implementation of [MySQL Test Framework](https://github.com/mys
 - All the tests should be put in [`t`](./t), take [t/example.test](./t/example.test) as an example.
 - All the expected test results should be put in [`r`](./r). Result file has the same file name with the corresponding test file, but with a `.result` file suffix, take [r/example.result](./r/example.result) as an examle.
 
-## How to use
+## Test Vector Store on Local
 
-Build the `mysql-tester` binary:
-```sh
-make
-```
+1. Start up a local TiDB cluster with TiUP
+
+    ```bash
+    tiup playground --without-monitor \
+        --db.binpath /path/to/tidb-server \
+        --db.config /path/to/tidb-server/config.toml \
+        --kv.binpath /path/to/tikv-server \
+        --tiflash.binpath /path/to/tiflash
+    ```
+   
+2. Build the `mysql-tester` binary
+
+    ```bash
+    make build
+    ```
+
+3. Run the test cases in `t` directory
+
+    ```bash
+    make run-vector-test
+    ```
+
+4. Update the test case
+
+    Update the test case in `t` directory, and run the following command to update the expected result in `r` directory.
+
+    ```bash
+    make update-vector-test
+    ```
+
+## Advanced Usage
 
 Basic usage:
+
 ```
 Usage of ./mysql-tester:
   -all
@@ -42,6 +70,7 @@ Usage of ./mysql-tester:
 ```
 
 By default, it connects to the TiDB/MySQL server at `127.0.0.1:4000` with `root` and no passward:
+
 ```sh
 ./mysql-tester # run all the tests
 ./mysql-tester example # run a specified test

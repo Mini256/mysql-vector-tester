@@ -1,8 +1,8 @@
-.PHONY: all build test tidy clean
+.PHONY: all build test tidy clean vector
 
 GO := go
 
-default: build
+default: vector-test
 
 build:
 	$(GO) build -o mysql-tester ./src
@@ -23,3 +23,9 @@ clean:
 
 gen_perror: generate_perror/main.go
 	$(GO) build -o gen_perror ./generate_perror
+
+run-vector-test: build
+	./mysql-tester -all --check-error
+
+update-vector-test: build
+	./mysql-tester -all --check-error --record vector
