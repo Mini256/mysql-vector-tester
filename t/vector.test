@@ -89,7 +89,7 @@ INSERT INTO t VALUES
 SELECT * FROM t ORDER BY embedding DESC;
 
 -- echo
--- echo -- Test VEC_DIMS Function
+-- echo -- Test VEC_DIMS() Function
 -- echo
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ VEC_DIMS(embedding) FROM t;
@@ -99,7 +99,7 @@ SELECT VEC_DIMS('[]');
 SELECT VEC_DIMS('[5, 3, 2]');
 
 -- echo
--- echo -- Test Vector VEC_FROM_TEXT Function
+-- echo -- Test Vector VEC_FROM_TEXT() Function
 -- echo
 
 SELECT VEC_FROM_TEXT('[]');
@@ -177,7 +177,7 @@ SELECT VEC_FROM_TEXT('[1, 2, 3]') < '[1]';
 SELECT VEC_FROM_TEXT('[1, 2, 3]') <= '[1]';
 
 -- echo
--- echo -- Test CAST Operator
+-- echo -- Test CAST() Operator
 -- echo
 
 SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS BINARY);
@@ -211,7 +211,7 @@ SELECT CAST('[1,2,3]' AS VECTOR<FLOAT>);
 SELECT CAST('[1,2,3]' AS VECTOR<DOUBLE>);
 
 -- echo
--- echo -- Test CONVERT Function
+-- echo -- Test CONVERT() Function
 -- echo
 
 SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), BINARY);
@@ -258,7 +258,7 @@ INSERT INTO t VALUES
     ('[1.4, 4.5, 8.5, 7.7, 6.2]');
 
 -- echo
--- echo -- Test COUNT Function
+-- echo -- Test COUNT() Function
 -- echo
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ COUNT(embedding) FROM t;
@@ -271,7 +271,7 @@ SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ COUNT(DISTINCT embedding) FROM t;
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ COUNT(DISTINCT embedding) FROM t;
 
 -- echo
--- echo -- Test MIN/MAX Function
+-- echo -- Test MIN() / MAX() Function
 -- echo
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ MIN(embedding) FROM t;
@@ -281,7 +281,7 @@ SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ MAX(embedding) FROM t;
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ MAX(embedding) FROM t;
 
 -- echo
--- echo -- Test SUM/AVG Function
+-- echo -- Test SUM() / AVG() Function
 -- echo
 
 -- error ER_UNKNOWN_ERROR
@@ -309,7 +309,7 @@ DELETE FROM t WHERE 1 = 1;
 INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,601]'), ('[4,5,61]');
 
 -- echo
--- echo -- Test FIRST_VALUE/LAST_VALUE/NTH_VALUE Window Function
+-- echo -- Test FIRST_VALUE() / LAST_VALUE() / NTH_VALUE() Window Function
 -- echo
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t WINDOW w AS (ORDER BY embedding)ORDER BY embedding;
@@ -319,21 +319,21 @@ DELETE FROM t WHERE 1 = 1;
 INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,6]'), ('[4,5,6]'), ('[7,8,9]');
 
 -- echo
--- echo -- Test ROW_NUMBER/RANK/DENSE_RANK Window Function
+-- echo -- Test ROW_NUMBER() / RANK() / DENSE_RANK() Window Function
 -- echo
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, ROW_NUMBER() OVER w AS 'row_num', RANK() OVER w AS 'rank', DENSE_RANK() OVER w AS 'dense_rank' FROM t WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, ROW_NUMBER() OVER w AS 'row_num', RANK() OVER w AS 'rank', DENSE_RANK() OVER w AS 'dense_rank' FROM t WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
 
 -- echo
--- echo -- Test LAG/LEAD Window Function
+-- echo -- Test LAG() / LEAD() Window Function
 -- echo
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, LAG(embedding) OVER w AS 'lag', LEAD(embedding) OVER w AS 'lead' FROM t WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, LAG(embedding) OVER w AS 'lag', LEAD(embedding) OVER w AS 'lead' FROM t WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
 
 -- echo
--- echo -- Test PARTITION BY/ORDER BY Clause in Window Function
+-- echo -- Test PARTITION BY / ORDER BY Clause in Window Function
 -- echo
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, ROW_NUMBER() OVER (PARTITION BY embedding ORDER BY embedding) AS 'row_num' FROM t ORDER BY embedding;
