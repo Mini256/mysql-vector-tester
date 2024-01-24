@@ -60,12 +60,20 @@ embedding
 [1,2,3]
 [4,5,6]
 [7,8,9]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t;
+id	estRows	task	access object	operator info
+TableReader	10000.00	root		data:TableFullScan
+└─TableFullScan	10000.00	cop[tikv]	table:t	keep order:false, stats:pseudo
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t;
 embedding
 [1,2,3]
 [1,2,3]
 [4,5,6]
 [7,8,9]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t;
+id	estRows	task	access object	operator info
+TableReader	10000.00	root		data:TableFullScan
+└─TableFullScan	10000.00	cop[tiflash]	table:t	keep order:false, stats:pseudo
 
 -- Test ANALYZE TABLE Statement
 
@@ -88,7 +96,7 @@ embedding
 [3.6,9.7,2.4,6.6,4.9]
 [1.4,4.5,8.5,7.7,6.2]
 
--- Test VEC_DIMS Function
+-- Test VEC_DIMS() Function
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ VEC_DIMS(embedding) FROM t;
 VEC_DIMS(embedding)
@@ -114,7 +122,7 @@ SELECT VEC_DIMS('[5, 3, 2]');
 VEC_DIMS('[5, 3, 2]')
 3
 
--- Test Vector VEC_FROM_TEXT Function
+-- Test Vector VEC_FROM_TEXT() Function
 
 SELECT VEC_FROM_TEXT('[]');
 VEC_FROM_TEXT('[]')
@@ -227,7 +235,7 @@ SELECT VEC_FROM_TEXT('[1, 2, 3]') <= '[1]';
 VEC_FROM_TEXT('[1, 2, 3]') <= '[1]'
 0
 
--- Test CAST Operator
+-- Test CAST() Operator
 
 SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS BINARY);
 CAST(VEC_FROM_TEXT('[1,2,3]') AS BINARY)
@@ -266,7 +274,7 @@ CAST('[1,2,3]' AS VECTOR<FLOAT>)
 SELECT CAST('[1,2,3]' AS VECTOR<DOUBLE>);
 Error 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your TiDB version for the right syntax to use line 1 column 40 near ");"Only VECTOR<FLOAT> is supported for now 
 
--- Test CONVERT Function
+-- Test CONVERT() Function
 
 SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), BINARY);
 CONVERT(VEC_FROM_TEXT('[1,2,3]'), BINARY)
@@ -316,7 +324,7 @@ INSERT INTO t VALUES
 ('[7.7, 6.7, 8.3, 7.8, 5.7]'),
 ('[1.4, 4.5, 8.5, 7.7, 6.2]');
 
--- Test COUNT Function
+-- Test COUNT() Function
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ COUNT(embedding) FROM t;
 COUNT(embedding)
@@ -345,7 +353,7 @@ SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ COUNT(DISTINCT embedding) FROM t;
 COUNT(DISTINCT embedding)
 5
 
--- Test MIN/MAX Function
+-- Test MIN() / MAX() Function
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ MIN(embedding) FROM t;
 MIN(embedding)
@@ -360,7 +368,7 @@ SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ MAX(embedding) FROM t;
 MAX(embedding)
 [8.7,5.7,7.7,9.8,1.5]
 
--- Test SUM/AVG Function
+-- Test SUM() / AVG() Function
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ SUM(embedding) FROM t;
 Error 1105 (HY000): cannot cast from vector<float> to double
@@ -387,7 +395,7 @@ embedding
 DELETE FROM t WHERE 1 = 1;
 INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,601]'), ('[4,5,61]');
 
--- Test FIRST_VALUE/LAST_VALUE/NTH_VALUE Window Function
+-- Test FIRST_VALUE() / LAST_VALUE() / NTH_VALUE() Window Function
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t WINDOW w AS (ORDER BY embedding)ORDER BY embedding;
 embedding	first	second	last
@@ -402,7 +410,7 @@ embedding	first	second	last
 DELETE FROM t WHERE 1 = 1;
 INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,6]'), ('[4,5,6]'), ('[7,8,9]');
 
--- Test ROW_NUMBER/RANK/DENSE_RANK Window Function
+-- Test ROW_NUMBER() / RANK() / DENSE_RANK() Window Function
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, ROW_NUMBER() OVER w AS 'row_num', RANK() OVER w AS 'rank', DENSE_RANK() OVER w AS 'dense_rank' FROM t WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
 embedding	row_num	rank	dense_rank
@@ -417,7 +425,7 @@ embedding	row_num	rank	dense_rank
 [4,5,6]	3	2	2
 [7,8,9]	4	4	3
 
--- Test LAG/LEAD Window Function
+-- Test LAG() / LEAD() Window Function
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, LAG(embedding) OVER w AS 'lag', LEAD(embedding) OVER w AS 'lead' FROM t WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
 embedding	lag	lead
@@ -432,7 +440,7 @@ embedding	lag	lead
 [4,5,6]	[4,5,6]	[7,8,9]
 [7,8,9]	[4,5,6]	NULL
 
--- Test PARTITION BY/ORDER BY Clause in Window Function
+-- Test PARTITION BY / ORDER BY Clause in Window Function
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, ROW_NUMBER() OVER (PARTITION BY embedding ORDER BY embedding) AS 'row_num' FROM t ORDER BY embedding;
 embedding	row_num

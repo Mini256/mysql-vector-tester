@@ -64,8 +64,10 @@ DELETE FROM t WHERE embedding IS NULL;
 
 -- sorted_result
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t;
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t;
 -- sorted_result
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t;
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t;
 
 -- echo
 -- echo -- Test ANALYZE TABLE Statement
@@ -343,4 +345,5 @@ SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, ROW_NUMBER() OVER (PARTIT
 -- echo -- Test TRUNCATE TABLE Statement
 -- echo
 
+# Note: TRUNCATE TABLE Command will delete the TiFlash replica.
 TRUNCATE TABLE t;
