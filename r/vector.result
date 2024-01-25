@@ -26,8 +26,8 @@ DROP TABLE IF EXISTS t2;
 CREATE TABLE t2 (id INT, embedding VECTOR);
 ALTER TABLE t2 SET TIFLASH REPLICA 1;
 INSERT INTO t2 VALUES (3, '[4,5,6]'), (4, '[7,8,9]');
-SELECT SLEEP(15);
-SLEEP(15)
+SELECT SLEEP(30);
+SLEEP(30)
 0
 SELECT REPLICA_COUNT, AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t', 't1', 't2') ORDER BY TABLE_NAME;
 REPLICA_COUNT	AVAILABLE	PROGRESS
@@ -85,6 +85,7 @@ EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t;
 id	estRows	task	access object	operator info
 TableReader	10000.00	root		data:TableFullScan
 └─TableFullScan	10000.00	cop[tikv]	table:t	keep order:false, stats:pseudo
+
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t;
 embedding
 [1,2,3]
@@ -95,64 +96,84 @@ id	estRows	task	access object	operator info
 TableReader	10000.00	root		data:TableFullScan
 └─TableFullScan	10000.00	cop[tiflash]	table:t	keep order:false, stats:pseudo
 
+-- Prepare test data
+
+DELETE FROM t WHERE 1 = 1;
+INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,6]'), ('[7,8,9]'), (NULL), ('[]');
+
 -- Test statement: ANALYZE TABLE
 
 ANALYZE TABLE t;
 
--- Test clause: ORDER BY
-
-DELETE FROM t WHERE 1 = 1;
-INSERT INTO t VALUES
-('[8.7, 5.7, 7.7, 9.8, 1.5]'),
-('[3.6, 9.7, 2.4, 6.6, 4.9]'),
-('[4.7, 4.9, 2.6, 5.2, 7.4]'),
-('[7.7, 6.7, 8.3, 7.8, 5.7]'),
-('[1.4, 4.5, 8.5, 7.7, 6.2]');
-
-SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t ORDER BY embedding DESC;
-embedding
-[8.7,5.7,7.7,9.8,1.5]
-[7.7,6.7,8.3,7.8,5.7]
-[4.7,4.9,2.6,5.2,7.4]
-[3.6,9.7,2.4,6.6,4.9]
-[1.4,4.5,8.5,7.7,6.2]
-
-SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t ORDER BY embedding DESC;
-embedding
-[8.7,5.7,7.7,9.8,1.5]
-[7.7,6.7,8.3,7.8,5.7]
-[4.7,4.9,2.6,5.2,7.4]
-[3.6,9.7,2.4,6.6,4.9]
-[1.4,4.5,8.5,7.7,6.2]
-
 -- Test vector functions
-
 
 -- Test vector function: VEC_DIMS()
 
-SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ VEC_DIMS(embedding) FROM t;
-VEC_DIMS(embedding)
-5
-5
-5
-5
-5
-SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ VEC_DIMS(embedding) FROM t;
-VEC_DIMS(embedding)
-5
-5
-5
-5
-5
 SELECT VEC_DIMS(NULL);
 VEC_DIMS(NULL)
 NULL
+
 SELECT VEC_DIMS('[]');
 VEC_DIMS('[]')
 0
+
 SELECT VEC_DIMS('[5, 3, 2]');
 VEC_DIMS('[5, 3, 2]')
 3
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+VEC_DIMS(embedding)
+NULL
+0
+3
+3
+3
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+id	estRows	task	access object	operator info
+Projection	5.00	root		Column#3
+└─Sort	5.00	root		vector.t.embedding
+  └─Projection	5.00	root		vec_dims(vector.t.embedding)->Column#3, vector.t.embedding
+    └─TableReader	5.00	root		data:TableFullScan
+      └─TableFullScan	5.00	cop[tikv]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+VEC_DIMS(embedding)
+NULL
+0
+3
+3
+3
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+id	estRows	task	access object	operator info
+Projection	5.00	root		Column#3
+└─Sort	5.00	root		vector.t.embedding
+  └─Projection	5.00	root		vec_dims(vector.t.embedding)->Column#3, vector.t.embedding
+    └─TableReader	5.00	root		data:TableFullScan
+      └─TableFullScan	5.00	cop[tiflash]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+embedding
+[1,2,3]
+[4,5,6]
+[7,8,9]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+id	estRows	task	access object	operator info
+Sort	4.00	root		vector.t.embedding
+└─Selection	4.00	root		eq(vec_dims(vector.t.embedding), 3)
+  └─TableReader	5.00	root		data:TableFullScan
+    └─TableFullScan	5.00	cop[tikv]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+embedding
+[1,2,3]
+[4,5,6]
+[7,8,9]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+id	estRows	task	access object	operator info
+Sort	4.00	root		vector.t.embedding
+└─Selection	4.00	root		eq(vec_dims(vector.t.embedding), 3)
+  └─TableReader	5.00	root		data:TableFullScan
+    └─TableFullScan	5.00	cop[tiflash]	table:t	keep order:false
 
 -- Test vector function: VEC_FROM_TEXT()
 
@@ -178,10 +199,64 @@ SELECT VEC_FROM_TEXT('[]') IS NULL;
 VEC_FROM_TEXT('[]') IS NULL
 0
 
--- Prepare test data
+-- Test arithmetic operators: + / - / * / /
 
-DELETE FROM t WHERE 1 = 1;
-INSERT INTO t VALUES ('[1, 2, 3]'), ('[4, 5, 6]'), ('[7, 8, 9]'), (NULL), ('[]');
+SELECT VEC_FROM_TEXT('[1,2]') + VEC_FROM_TEXT('[2,3]');
+Error 1105 (HY000): cannot cast from vector<float> to double
+
+-- Test comparison operators
+
+SELECT VEC_FROM_TEXT('[]') = VEC_FROM_TEXT('[]');
+VEC_FROM_TEXT('[]') = VEC_FROM_TEXT('[]')
+1
+SELECT VEC_FROM_TEXT('[]') != VEC_FROM_TEXT('[]');
+VEC_FROM_TEXT('[]') != VEC_FROM_TEXT('[]')
+0
+SELECT VEC_FROM_TEXT('[]') > VEC_FROM_TEXT('[]');
+VEC_FROM_TEXT('[]') > VEC_FROM_TEXT('[]')
+0
+SELECT VEC_FROM_TEXT('[]') >= VEC_FROM_TEXT('[]');
+VEC_FROM_TEXT('[]') >= VEC_FROM_TEXT('[]')
+1
+SELECT VEC_FROM_TEXT('[]') < VEC_FROM_TEXT('[]');
+VEC_FROM_TEXT('[]') < VEC_FROM_TEXT('[]')
+0
+SELECT VEC_FROM_TEXT('[]') <= VEC_FROM_TEXT('[]');
+VEC_FROM_TEXT('[]') <= VEC_FROM_TEXT('[]')
+1
+
+SELECT VEC_FROM_TEXT('[1, 2, 3]') = VEC_FROM_TEXT('[1, 2, 3]');
+VEC_FROM_TEXT('[1, 2, 3]') = VEC_FROM_TEXT('[1, 2, 3]')
+1
+SELECT VEC_FROM_TEXT('[1, 2, 3]') != VEC_FROM_TEXT('[1, 2, 3]');
+VEC_FROM_TEXT('[1, 2, 3]') != VEC_FROM_TEXT('[1, 2, 3]')
+0
+
+SELECT VEC_FROM_TEXT('[1, 2, 3]') > VEC_FROM_TEXT('[1]');
+VEC_FROM_TEXT('[1, 2, 3]') > VEC_FROM_TEXT('[1]')
+1
+SELECT VEC_FROM_TEXT('[1, 2, 3]') >= VEC_FROM_TEXT('[1]');
+VEC_FROM_TEXT('[1, 2, 3]') >= VEC_FROM_TEXT('[1]')
+1
+SELECT VEC_FROM_TEXT('[1, 2, 3]') < VEC_FROM_TEXT('[1]');
+VEC_FROM_TEXT('[1, 2, 3]') < VEC_FROM_TEXT('[1]')
+0
+SELECT VEC_FROM_TEXT('[1, 2, 3]') <= VEC_FROM_TEXT('[1]');
+VEC_FROM_TEXT('[1, 2, 3]') <= VEC_FROM_TEXT('[1]')
+0
+
+SELECT VEC_FROM_TEXT('[1, 2, 3]') > '[1]';
+VEC_FROM_TEXT('[1, 2, 3]') > '[1]'
+1
+SELECT VEC_FROM_TEXT('[1, 2, 3]') >= '[1]';
+VEC_FROM_TEXT('[1, 2, 3]') >= '[1]'
+1
+SELECT VEC_FROM_TEXT('[1, 2, 3]') < '[1]';
+VEC_FROM_TEXT('[1, 2, 3]') < '[1]'
+0
+SELECT VEC_FROM_TEXT('[1, 2, 3]') <= '[1]';
+VEC_FROM_TEXT('[1, 2, 3]') <= '[1]'
+0
 
 -- Test clause: WHERE
 
@@ -225,6 +300,7 @@ SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IN ('[1,2,3]',
 Error 1105 (HY000): VectorFloat32 is not supported for IN()
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
 Error 1105 (HY000): VectorFloat32 is not supported for IN()
+
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
 Error 1105 (HY000): VectorFloat32 is not supported for IN()
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding NOT IN ('[1,2,3]', '[4,5,6]');
@@ -239,61 +315,33 @@ SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t GROUP BY embedding 
 embedding
 [7,8,9]
 
--- Test arithmetic operators: + / - / * / /
+-- Prepare test data
 
-SELECT VEC_FROM_TEXT('[1,2]') + VEC_FROM_TEXT('[2,3]');
-Error 1105 (HY000): Vector does not support plus operator
+DELETE FROM t WHERE 1 = 1;
+INSERT INTO t VALUES
+('[8.7, 5.7, 7.7, 9.8, 1.5]'),
+('[3.6, 9.7, 2.4, 6.6, 4.9]'),
+('[4.7, 4.9, 2.6, 5.2, 7.4]'),
+('[7.7, 6.7, 8.3, 7.8, 5.7]'),
+('[1.4, 4.5, 8.5, 7.7, 6.2]');
 
--- Test comparison operators
+-- Test clause: ORDER BY
 
-SELECT VEC_FROM_TEXT('[]') = VEC_FROM_TEXT('[]');
-VEC_FROM_TEXT('[]') = VEC_FROM_TEXT('[]')
-1
-SELECT VEC_FROM_TEXT('[]') != VEC_FROM_TEXT('[]');
-VEC_FROM_TEXT('[]') != VEC_FROM_TEXT('[]')
-0
-SELECT VEC_FROM_TEXT('[]') > VEC_FROM_TEXT('[]');
-VEC_FROM_TEXT('[]') > VEC_FROM_TEXT('[]')
-0
-SELECT VEC_FROM_TEXT('[]') >= VEC_FROM_TEXT('[]');
-VEC_FROM_TEXT('[]') >= VEC_FROM_TEXT('[]')
-1
-SELECT VEC_FROM_TEXT('[]') < VEC_FROM_TEXT('[]');
-VEC_FROM_TEXT('[]') < VEC_FROM_TEXT('[]')
-0
-SELECT VEC_FROM_TEXT('[]') <= VEC_FROM_TEXT('[]');
-VEC_FROM_TEXT('[]') <= VEC_FROM_TEXT('[]')
-1
-SELECT VEC_FROM_TEXT('[1, 2, 3]') = VEC_FROM_TEXT('[1, 2, 3]');
-VEC_FROM_TEXT('[1, 2, 3]') = VEC_FROM_TEXT('[1, 2, 3]')
-1
-SELECT VEC_FROM_TEXT('[1, 2, 3]') != VEC_FROM_TEXT('[1, 2, 3]');
-VEC_FROM_TEXT('[1, 2, 3]') != VEC_FROM_TEXT('[1, 2, 3]')
-0
-SELECT VEC_FROM_TEXT('[1, 2, 3]') > VEC_FROM_TEXT('[1]');
-VEC_FROM_TEXT('[1, 2, 3]') > VEC_FROM_TEXT('[1]')
-1
-SELECT VEC_FROM_TEXT('[1, 2, 3]') >= VEC_FROM_TEXT('[1]');
-VEC_FROM_TEXT('[1, 2, 3]') >= VEC_FROM_TEXT('[1]')
-1
-SELECT VEC_FROM_TEXT('[1, 2, 3]') < VEC_FROM_TEXT('[1]');
-VEC_FROM_TEXT('[1, 2, 3]') < VEC_FROM_TEXT('[1]')
-0
-SELECT VEC_FROM_TEXT('[1, 2, 3]') <= VEC_FROM_TEXT('[1]');
-VEC_FROM_TEXT('[1, 2, 3]') <= VEC_FROM_TEXT('[1]')
-0
-SELECT VEC_FROM_TEXT('[1, 2, 3]') > '[1]';
-VEC_FROM_TEXT('[1, 2, 3]') > '[1]'
-1
-SELECT VEC_FROM_TEXT('[1, 2, 3]') >= '[1]';
-VEC_FROM_TEXT('[1, 2, 3]') >= '[1]'
-1
-SELECT VEC_FROM_TEXT('[1, 2, 3]') < '[1]';
-VEC_FROM_TEXT('[1, 2, 3]') < '[1]'
-0
-SELECT VEC_FROM_TEXT('[1, 2, 3]') <= '[1]';
-VEC_FROM_TEXT('[1, 2, 3]') <= '[1]'
-0
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t ORDER BY embedding DESC;
+embedding
+[8.7,5.7,7.7,9.8,1.5]
+[7.7,6.7,8.3,7.8,5.7]
+[4.7,4.9,2.6,5.2,7.4]
+[3.6,9.7,2.4,6.6,4.9]
+[1.4,4.5,8.5,7.7,6.2]
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t ORDER BY embedding DESC;
+embedding
+[8.7,5.7,7.7,9.8,1.5]
+[7.7,6.7,8.3,7.8,5.7]
+[4.7,4.9,2.6,5.2,7.4]
+[3.6,9.7,2.4,6.6,4.9]
+[1.4,4.5,8.5,7.7,6.2]
 
 -- Test comparison functions/operators
 
@@ -720,16 +768,48 @@ embedding
 
 -- Test clause: JOIN
 
-SELECT t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+SELECT /*+ READ_FROM_STORAGE(TIKV[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
 embedding	embedding
 [4,5,6]	[4,5,6]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+id	estRows	task	access object	operator info
+HashJoin	2.50	root		inner join, equal:[eq(vector.t1.embedding, vector.t2.embedding)]
+├─TableReader(Build)	2.00	root		data:TableFullScan
+│ └─TableFullScan	2.00	cop[tikv]	table:t2	keep order:false, stats:pseudo
+└─TableReader(Probe)	2.00	root		data:TableFullScan
+  └─TableFullScan	2.00	cop[tikv]	table:t1	keep order:false, stats:pseudo
+
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
 embedding	embedding
 [4,5,6]	[4,5,6]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+id	estRows	task	access object	operator info
+HashJoin	2.50	root		inner join, equal:[eq(vector.t1.embedding, vector.t2.embedding)]
+├─TableReader(Build)	2.00	root		data:TableFullScan
+│ └─TableFullScan	2.00	cop[tikv]	table:t2	keep order:false, stats:pseudo
+└─TableReader(Probe)	2.00	root		data:TableFullScan
+  └─TableFullScan	2.00	cop[tiflash]	table:t1	keep order:false, stats:pseudo
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIFLASH[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+embedding	embedding
+[4,5,6]	[4,5,6]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIFLASH[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+id	estRows	task	access object	operator info
+HashJoin	2.50	root		inner join, equal:[eq(vector.t1.embedding, vector.t2.embedding)]
+├─TableReader(Build)	2.00	root		data:TableFullScan
+│ └─TableFullScan	2.00	cop[tiflash]	table:t2	keep order:false, stats:pseudo
+└─TableReader(Probe)	2.00	root		data:TableFullScan
+  └─TableFullScan	2.00	cop[tiflash]	table:t1	keep order:false, stats:pseudo
 
 -- Test feature: CTE
 
-WITH t1 AS (SELECT * FROM t1), t2 AS (SELECT * FROM t2) SELECT * FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+WITH t1 AS (SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ * FROM t1), t2 AS (SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ * FROM t2) SELECT * FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+id	embedding	id	embedding
+2	[4,5,6]	3	[4,5,6]
+WITH t1 AS (SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ * FROM t1), t2 AS (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ * FROM t2) SELECT * FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+id	embedding	id	embedding
+2	[4,5,6]	3	[4,5,6]
+WITH t1 AS (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ * FROM t1), t2 AS (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ * FROM t2) SELECT * FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
 id	embedding	id	embedding
 2	[4,5,6]	3	[4,5,6]
 

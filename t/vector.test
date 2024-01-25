@@ -31,7 +31,7 @@ CREATE TABLE t2 (id INT, embedding VECTOR);
 ALTER TABLE t2 SET TIFLASH REPLICA 1;
 INSERT INTO t2 VALUES (3, '[4,5,6]'), (4, '[7,8,9]');
 
-SELECT SLEEP(15);
+SELECT SLEEP(30);
 SELECT REPLICA_COUNT, AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t', 't1', 't2') ORDER BY TABLE_NAME;
 
 -- echo
@@ -79,58 +79,63 @@ DELETE FROM t WHERE embedding IS NULL;
 -- sorted_result
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t;
 EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t;
+-- echo
 -- sorted_result
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t;
 EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t;
 
 -- echo
--- echo -- Test statement: ANALYZE TABLE
--- echo
+-- echo -- Prepare test data
 
+-- echo
+DELETE FROM t WHERE 1 = 1;
+INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,6]'), ('[7,8,9]'), (NULL), ('[]');
+
+-- echo
+-- echo -- Test statement: ANALYZE TABLE
+
+-- echo
 ANALYZE TABLE t;
 
 -- echo
--- echo -- Test clause: ORDER BY
--- echo
-
-DELETE FROM t WHERE 1 = 1;
-INSERT INTO t VALUES
-    ('[8.7, 5.7, 7.7, 9.8, 1.5]'),
-    ('[3.6, 9.7, 2.4, 6.6, 4.9]'),
-    ('[4.7, 4.9, 2.6, 5.2, 7.4]'),
-    ('[7.7, 6.7, 8.3, 7.8, 5.7]'),
-    ('[1.4, 4.5, 8.5, 7.7, 6.2]');
-
--- echo
-SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t ORDER BY embedding DESC;
-
--- echo
-SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t ORDER BY embedding DESC;
-
--- echo
 -- echo -- Test vector functions
--- echo
 
 -- echo
 -- echo -- Test vector function: VEC_DIMS()
--- echo
 
-SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ VEC_DIMS(embedding) FROM t;
-SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ VEC_DIMS(embedding) FROM t;
+-- echo
 SELECT VEC_DIMS(NULL);
+-- echo
 SELECT VEC_DIMS('[]');
+-- echo
 SELECT VEC_DIMS('[5, 3, 2]');
 
 -- echo
--- echo -- Test vector function: VEC_FROM_TEXT()
--- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
 
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+
+-- echo
+-- echo -- Test vector function: VEC_FROM_TEXT()
+
+-- echo
 SELECT VEC_FROM_TEXT('[]');
 
 -- echo
 -- echo -- Test operator: IS
--- echo
 
+-- echo
 SELECT VEC_FROM_TEXT('[]') IS TRUE;
 SELECT VEC_FROM_TEXT('[]') IS FALSE;
 SELECT VEC_FROM_TEXT('[]') IS UNKNOWN;
@@ -138,10 +143,38 @@ SELECT VEC_FROM_TEXT('[]') IS NOT NULL;
 SELECT VEC_FROM_TEXT('[]') IS NULL;
 
 -- echo
--- echo -- Prepare test data
+-- echo -- Test arithmetic operators: + / - / * / /
+
 -- echo
-DELETE FROM t WHERE 1 = 1;
-INSERT INTO t VALUES ('[1, 2, 3]'), ('[4, 5, 6]'), ('[7, 8, 9]'), (NULL), ('[]');
+-- error ER_UNKNOWN_ERROR
+SELECT VEC_FROM_TEXT('[1,2]') + VEC_FROM_TEXT('[2,3]');
+
+-- echo
+-- echo -- Test comparison operators
+
+-- echo
+SELECT VEC_FROM_TEXT('[]') = VEC_FROM_TEXT('[]');
+SELECT VEC_FROM_TEXT('[]') != VEC_FROM_TEXT('[]');
+SELECT VEC_FROM_TEXT('[]') > VEC_FROM_TEXT('[]');
+SELECT VEC_FROM_TEXT('[]') >= VEC_FROM_TEXT('[]');
+SELECT VEC_FROM_TEXT('[]') < VEC_FROM_TEXT('[]');
+SELECT VEC_FROM_TEXT('[]') <= VEC_FROM_TEXT('[]');
+
+-- echo
+SELECT VEC_FROM_TEXT('[1, 2, 3]') = VEC_FROM_TEXT('[1, 2, 3]');
+SELECT VEC_FROM_TEXT('[1, 2, 3]') != VEC_FROM_TEXT('[1, 2, 3]');
+
+-- echo
+SELECT VEC_FROM_TEXT('[1, 2, 3]') > VEC_FROM_TEXT('[1]');
+SELECT VEC_FROM_TEXT('[1, 2, 3]') >= VEC_FROM_TEXT('[1]');
+SELECT VEC_FROM_TEXT('[1, 2, 3]') < VEC_FROM_TEXT('[1]');
+SELECT VEC_FROM_TEXT('[1, 2, 3]') <= VEC_FROM_TEXT('[1]');
+
+-- echo
+SELECT VEC_FROM_TEXT('[1, 2, 3]') > '[1]';
+SELECT VEC_FROM_TEXT('[1, 2, 3]') >= '[1]';
+SELECT VEC_FROM_TEXT('[1, 2, 3]') < '[1]';
+SELECT VEC_FROM_TEXT('[1, 2, 3]') <= '[1]';
 
 -- echo
 -- echo -- Test clause: WHERE
@@ -163,20 +196,21 @@ DELETE FROM t WHERE t.embedding IS NULL OR t.embedding = '[]';
 
 -- echo
 -- echo -- Test operator: BETWEEN ... AND ...
--- echo
 
+-- echo
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding BETWEEN '[1,2,3]' AND '[4,5,6]';
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding BETWEEN '[1,2,3]' AND '[4,5,6]';
 
 -- echo
 -- echo -- Test operator: IN / NOT IN
--- echo
 
+-- echo
 -- error ER_UNKNOWN_ERROR
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
 -- error ER_UNKNOWN_ERROR
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
 
+-- echo
 -- error ER_UNKNOWN_ERROR
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
 -- error ER_UNKNOWN_ERROR
@@ -184,42 +218,32 @@ SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding NOT IN ('[1
 
 -- echo
 -- echo -- Test clause: HAVING
--- echo
 
+-- echo
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t GROUP BY embedding HAVING embedding > VEC_FROM_TEXT('[4,5,6]') ORDER BY embedding;
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t GROUP BY embedding HAVING embedding > VEC_FROM_TEXT('[4,5,6]') ORDER BY embedding;
 
+-- echo
+-- echo -- Prepare test data
 
 -- echo
--- echo -- Test arithmetic operators: + / - / * / /
+DELETE FROM t WHERE 1 = 1;
+INSERT INTO t VALUES
+    ('[8.7, 5.7, 7.7, 9.8, 1.5]'),
+    ('[3.6, 9.7, 2.4, 6.6, 4.9]'),
+    ('[4.7, 4.9, 2.6, 5.2, 7.4]'),
+    ('[7.7, 6.7, 8.3, 7.8, 5.7]'),
+    ('[1.4, 4.5, 8.5, 7.7, 6.2]');
+
 -- echo
-
--- error ER_UNKNOWN_ERROR
-SELECT VEC_FROM_TEXT('[1,2]') + VEC_FROM_TEXT('[2,3]');
+-- echo -- Test clause: ORDER BY
 
 -- echo
--- echo -- Test comparison operators
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t ORDER BY embedding DESC;
+
 -- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t ORDER BY embedding DESC;
 
-SELECT VEC_FROM_TEXT('[]') = VEC_FROM_TEXT('[]');
-SELECT VEC_FROM_TEXT('[]') != VEC_FROM_TEXT('[]');
-SELECT VEC_FROM_TEXT('[]') > VEC_FROM_TEXT('[]');
-SELECT VEC_FROM_TEXT('[]') >= VEC_FROM_TEXT('[]');
-SELECT VEC_FROM_TEXT('[]') < VEC_FROM_TEXT('[]');
-SELECT VEC_FROM_TEXT('[]') <= VEC_FROM_TEXT('[]');
-
-SELECT VEC_FROM_TEXT('[1, 2, 3]') = VEC_FROM_TEXT('[1, 2, 3]');
-SELECT VEC_FROM_TEXT('[1, 2, 3]') != VEC_FROM_TEXT('[1, 2, 3]');
-
-SELECT VEC_FROM_TEXT('[1, 2, 3]') > VEC_FROM_TEXT('[1]');
-SELECT VEC_FROM_TEXT('[1, 2, 3]') >= VEC_FROM_TEXT('[1]');
-SELECT VEC_FROM_TEXT('[1, 2, 3]') < VEC_FROM_TEXT('[1]');
-SELECT VEC_FROM_TEXT('[1, 2, 3]') <= VEC_FROM_TEXT('[1]');
-
-SELECT VEC_FROM_TEXT('[1, 2, 3]') > '[1]';
-SELECT VEC_FROM_TEXT('[1, 2, 3]') >= '[1]';
-SELECT VEC_FROM_TEXT('[1, 2, 3]') < '[1]';
-SELECT VEC_FROM_TEXT('[1, 2, 3]') <= '[1]';
 
 -- echo
 -- echo -- Test comparison functions/operators
@@ -562,13 +586,21 @@ SELECT t1.embedding FROM t1 INTERSECT SELECT t2.embedding FROM t2;
 -- echo
 -- echo -- Test clause: JOIN
 -- echo
-SELECT t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+SELECT /*+ READ_FROM_STORAGE(TIKV[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+-- echo
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIFLASH[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIFLASH[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
 
 -- echo
 -- echo -- Test feature: CTE
 -- echo
-WITH t1 AS (SELECT * FROM t1), t2 AS (SELECT * FROM t2) SELECT * FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+WITH t1 AS (SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ * FROM t1), t2 AS (SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ * FROM t2) SELECT * FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+WITH t1 AS (SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ * FROM t1), t2 AS (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ * FROM t2) SELECT * FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+WITH t1 AS (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ * FROM t1), t2 AS (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ * FROM t2) SELECT * FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
 
 -- echo
 -- echo -- Test feature: Prepared Statement
