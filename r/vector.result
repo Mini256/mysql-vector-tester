@@ -18,16 +18,18 @@ CREATE TABLE t (embedding VECTOR);
 -- Prepare test data and enable TiFlash replica
 
 ALTER TABLE t SET TIFLASH REPLICA 1;
+
 DROP TABLE IF EXISTS t1;
 CREATE TABLE t1 (id INT, embedding VECTOR);
 ALTER TABLE t1 SET TIFLASH REPLICA 1;
 INSERT INTO t1  VALUES (1, '[1,2,3]'), (2, '[4,5,6]');
+
 DROP TABLE IF EXISTS t2;
 CREATE TABLE t2 (id INT, embedding VECTOR);
 ALTER TABLE t2 SET TIFLASH REPLICA 1;
 INSERT INTO t2 VALUES (3, '[4,5,6]'), (4, '[7,8,9]');
-SELECT SLEEP(30);
-SLEEP(30)
+SELECT SLEEP(10);
+SLEEP(10)
 0
 SELECT REPLICA_COUNT, AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t', 't1', 't2') ORDER BY TABLE_NAME;
 REPLICA_COUNT	AVAILABLE	PROGRESS
@@ -49,6 +51,7 @@ INSERT INTO t VALUES (NULL);
 
 INSERT INTO t VALUES ('[4,5,6]'), ('[7,8,9]');
 
+-- Test statement:  INSERT ... SELECT ...
 CREATE TABLE tmp (embedding VECTOR);
 INSERT INTO tmp SELECT embedding FROM t;
 SELECT embedding FROM tmp ORDER BY embedding;
@@ -186,12 +189,19 @@ VEC_FROM_TEXT('[]')
 SELECT VEC_FROM_TEXT('[]') IS TRUE;
 VEC_FROM_TEXT('[]') IS TRUE
 0
+SHOW WARNINGS;
+Level	Code	Message
 SELECT VEC_FROM_TEXT('[]') IS FALSE;
 VEC_FROM_TEXT('[]') IS FALSE
 1
+SHOW WARNINGS;
+Level	Code	Message
 SELECT VEC_FROM_TEXT('[]') IS UNKNOWN;
 VEC_FROM_TEXT('[]') IS UNKNOWN
 0
+SHOW WARNINGS;
+Level	Code	Message
+
 SELECT VEC_FROM_TEXT('[]') IS NOT NULL;
 VEC_FROM_TEXT('[]') IS NOT NULL
 1
@@ -773,33 +783,33 @@ embedding	embedding
 [4,5,6]	[4,5,6]
 EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
 id	estRows	task	access object	operator info
-HashJoin	2.50	root		inner join, equal:[eq(vector.t1.embedding, vector.t2.embedding)]
-├─TableReader(Build)	2.00	root		data:TableFullScan
-│ └─TableFullScan	2.00	cop[tikv]	table:t2	keep order:false, stats:pseudo
-└─TableReader(Probe)	2.00	root		data:TableFullScan
-  └─TableFullScan	2.00	cop[tikv]	table:t1	keep order:false, stats:pseudo
+HashJoin	12500.00	root		inner join, equal:[eq(vector.t1.embedding, vector.t2.embedding)]
+├─TableReader(Build)	10000.00	root		data:TableFullScan
+│ └─TableFullScan	10000.00	cop[tikv]	table:t2	keep order:false, stats:pseudo
+└─TableReader(Probe)	10000.00	root		data:TableFullScan
+  └─TableFullScan	10000.00	cop[tikv]	table:t1	keep order:false, stats:pseudo
 
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
 embedding	embedding
 [4,5,6]	[4,5,6]
 EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
 id	estRows	task	access object	operator info
-HashJoin	2.50	root		inner join, equal:[eq(vector.t1.embedding, vector.t2.embedding)]
-├─TableReader(Build)	2.00	root		data:TableFullScan
-│ └─TableFullScan	2.00	cop[tikv]	table:t2	keep order:false, stats:pseudo
-└─TableReader(Probe)	2.00	root		data:TableFullScan
-  └─TableFullScan	2.00	cop[tiflash]	table:t1	keep order:false, stats:pseudo
+HashJoin	12500.00	root		inner join, equal:[eq(vector.t1.embedding, vector.t2.embedding)]
+├─TableReader(Build)	10000.00	root		data:TableFullScan
+│ └─TableFullScan	10000.00	cop[tikv]	table:t2	keep order:false, stats:pseudo
+└─TableReader(Probe)	10000.00	root		data:TableFullScan
+  └─TableFullScan	10000.00	cop[tiflash]	table:t1	keep order:false, stats:pseudo
 
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIFLASH[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
 embedding	embedding
 [4,5,6]	[4,5,6]
 EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIFLASH[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
 id	estRows	task	access object	operator info
-HashJoin	2.50	root		inner join, equal:[eq(vector.t1.embedding, vector.t2.embedding)]
-├─TableReader(Build)	2.00	root		data:TableFullScan
-│ └─TableFullScan	2.00	cop[tiflash]	table:t2	keep order:false, stats:pseudo
-└─TableReader(Probe)	2.00	root		data:TableFullScan
-  └─TableFullScan	2.00	cop[tiflash]	table:t1	keep order:false, stats:pseudo
+HashJoin	12500.00	root		inner join, equal:[eq(vector.t1.embedding, vector.t2.embedding)]
+├─TableReader(Build)	10000.00	root		data:TableFullScan
+│ └─TableFullScan	10000.00	cop[tiflash]	table:t2	keep order:false, stats:pseudo
+└─TableReader(Probe)	10000.00	root		data:TableFullScan
+  └─TableFullScan	10000.00	cop[tiflash]	table:t1	keep order:false, stats:pseudo
 
 -- Test feature: CTE
 

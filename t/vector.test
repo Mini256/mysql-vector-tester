@@ -18,20 +18,23 @@ CREATE TABLE t (embedding VECTOR);
 
 -- echo
 -- echo -- Prepare test data and enable TiFlash replica
+
 -- echo
 ALTER TABLE t SET TIFLASH REPLICA 1;
 
+-- echo
 DROP TABLE IF EXISTS t1;
 CREATE TABLE t1 (id INT, embedding VECTOR);
 ALTER TABLE t1 SET TIFLASH REPLICA 1;
 INSERT INTO t1  VALUES (1, '[1,2,3]'), (2, '[4,5,6]');
 
+-- echo
 DROP TABLE IF EXISTS t2;
 CREATE TABLE t2 (id INT, embedding VECTOR);
 ALTER TABLE t2 SET TIFLASH REPLICA 1;
 INSERT INTO t2 VALUES (3, '[4,5,6]'), (4, '[7,8,9]');
 
-SELECT SLEEP(30);
+SELECT SLEEP(10);
 SELECT REPLICA_COUNT, AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t', 't1', 't2') ORDER BY TABLE_NAME;
 
 -- echo
@@ -50,6 +53,7 @@ INSERT INTO t VALUES (NULL);
 -- echo
 INSERT INTO t VALUES ('[4,5,6]'), ('[7,8,9]');
 -- echo
+-- echo -- Test statement:  INSERT ... SELECT ...
 CREATE TABLE tmp (embedding VECTOR);
 INSERT INTO tmp SELECT embedding FROM t;
 SELECT embedding FROM tmp ORDER BY embedding;
@@ -137,8 +141,13 @@ SELECT VEC_FROM_TEXT('[]');
 
 -- echo
 SELECT VEC_FROM_TEXT('[]') IS TRUE;
+SHOW WARNINGS;
 SELECT VEC_FROM_TEXT('[]') IS FALSE;
+SHOW WARNINGS;
 SELECT VEC_FROM_TEXT('[]') IS UNKNOWN;
+SHOW WARNINGS;
+
+-- echo
 SELECT VEC_FROM_TEXT('[]') IS NOT NULL;
 SELECT VEC_FROM_TEXT('[]') IS NULL;
 
@@ -451,8 +460,8 @@ INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,601]'), ('[4,5,61]');
 -- echo -- Test window functions: FIRST_VALUE() / LAST_VALUE() / NTH_VALUE()
 -- echo
 
-SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t WINDOW w AS (ORDER BY embedding)ORDER BY embedding;
-SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t WINDOW w AS (ORDER BY embedding)ORDER BY embedding;
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
 
 -- echo
 -- echo -- Prepare test data
