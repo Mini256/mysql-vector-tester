@@ -190,16 +190,19 @@ SELECT VEC_FROM_TEXT('[1, 2, 3]') <= '[1]';
 
 -- echo
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS NULL;
-SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS NULL;
 
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS NULL;
 -- echo
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding = '[]';
-SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding = '[]';
 
 -- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding = '[]';
+-- echo
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding = VEC_FROM_TEXT('[1,2,3]');
-SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding = VEC_FROM_TEXT('[1,2,3]');
 
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding = VEC_FROM_TEXT('[1,2,3]');
 -- echo
 DELETE FROM t WHERE t.embedding IS NULL OR t.embedding = '[]';
 
@@ -208,6 +211,7 @@ DELETE FROM t WHERE t.embedding IS NULL OR t.embedding = '[]';
 
 -- echo
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding BETWEEN '[1,2,3]' AND '[4,5,6]';
+-- echo
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding BETWEEN '[1,2,3]' AND '[4,5,6]';
 
 -- echo
@@ -216,8 +220,25 @@ SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding BETWEEN '[1
 -- echo
 -- error ER_UNKNOWN_ERROR
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
+-- echo
 -- error ER_UNKNOWN_ERROR
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
+
+-- echo
+-- echo -- Test operator: LIKE
+
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding LIKE '%2%';
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding LIKE '%2%';
+
+-- echo
+-- echo -- Test operator: ILIKE
+
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding ILIKE '%2%';
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding ILIKE '%2%';
 
 -- echo
 -- error ER_UNKNOWN_ERROR
@@ -230,6 +251,7 @@ SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding NOT IN ('[1
 
 -- echo
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t GROUP BY embedding HAVING embedding > VEC_FROM_TEXT('[4,5,6]') ORDER BY embedding;
+-- echo
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t GROUP BY embedding HAVING embedding > VEC_FROM_TEXT('[4,5,6]') ORDER BY embedding;
 
 -- echo

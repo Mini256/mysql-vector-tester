@@ -308,8 +308,29 @@ embedding
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
 Error 1105 (HY000): VectorFloat32 is not supported for IN()
+
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
 Error 1105 (HY000): VectorFloat32 is not supported for IN()
+
+-- Test operator: LIKE
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding LIKE '%2%';
+embedding
+[1,2,3]
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding LIKE '%2%';
+embedding
+[1,2,3]
+
+-- Test operator: ILIKE
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding ILIKE '%2%';
+embedding
+[1,2,3]
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding ILIKE '%2%';
+embedding
+[1,2,3]
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
 Error 1105 (HY000): VectorFloat32 is not supported for IN()
@@ -573,12 +594,12 @@ INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,601]'), ('[4,5,61]');
 
 -- Test window functions: FIRST_VALUE() / LAST_VALUE() / NTH_VALUE()
 
-SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t WINDOW w AS (ORDER BY embedding)ORDER BY embedding;
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
 embedding	first	second	last
 [1,2,3]	[1,2,3]	NULL	[1,2,3]
 [4,5,61]	[1,2,3]	[4,5,61]	[4,5,61]
 [4,5,601]	[1,2,3]	[4,5,61]	[4,5,601]
-SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t WINDOW w AS (ORDER BY embedding)ORDER BY embedding;
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
 embedding	first	second	last
 [1,2,3]	[1,2,3]	NULL	[1,2,3]
 [4,5,61]	[1,2,3]	[4,5,61]	[4,5,61]
