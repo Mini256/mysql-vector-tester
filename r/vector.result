@@ -1,32 +1,43 @@
--- Test Variable
+-- Test user-defined variable
 
 SET @a = VEC_FROM_TEXT('[1,2,3]');
 SELECT @a;
 @a
 [1,2,3]
 
--- Test CREATE/DROP TABLE Statement
+-- Test system variable: TIDB_ENABLE_VECTOR_TYPE
 
-DROP TABLE IF EXISTS t;
 SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 0;
+DROP TABLE IF EXISTS t;
 CREATE TABLE t (embedding VECTOR);
 Error 1105 (HY000): vector type is not supported
+
 SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 1;
 CREATE TABLE t (embedding VECTOR);
 
--- Test ALTER TABLE Statement
+-- Prepare test data and enable TiFlash replica
 
 ALTER TABLE t SET TIFLASH REPLICA 1;
-SELECT SLEEP(10);
-SLEEP(10)
+DROP TABLE IF EXISTS t1;
+CREATE TABLE t1 (id INT, embedding VECTOR);
+ALTER TABLE t1 SET TIFLASH REPLICA 1;
+INSERT INTO t1  VALUES (1, '[1,2,3]'), (2, '[4,5,6]');
+DROP TABLE IF EXISTS t2;
+CREATE TABLE t2 (id INT, embedding VECTOR);
+ALTER TABLE t2 SET TIFLASH REPLICA 1;
+INSERT INTO t2 VALUES (3, '[4,5,6]'), (4, '[7,8,9]');
+SELECT SLEEP(15);
+SLEEP(15)
 0
-SELECT REPLICA_COUNT, AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 't';
+SELECT REPLICA_COUNT, AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t', 't1', 't2') ORDER BY TABLE_NAME;
 REPLICA_COUNT	AVAILABLE	PROGRESS
 1	1	1
+1	1	1
+1	1	1
 
--- Test INSERT Statement
+-- Test statement: INSERT
 
-INSERT INTO t VALUES ('[1,2.1,3.3]');
+INSERT INTO t VALUES (VEC_FROM_TEXT('[1,2.1,3.3]'));
 INSERT INTO t VALUES ('[1,2.1,null]');
 Error 1105 (HY000): Invalid vector text: [1,2.1,null]
 INSERT INTO t VALUES ('[1,2.1,inf]');
@@ -35,10 +46,21 @@ INSERT INTO t VALUES ('[1,2.1,nan]');
 Error 1105 (HY000): Invalid vector text: [1,2.1,nan]
 INSERT INTO t VALUES ('[]');
 INSERT INTO t VALUES (NULL);
-INSERT INTO t VALUES ('[4,5,6]'), ('[7,8,9]');
-INSERT INTO t (SELECT '[1,2,3]' UNION SELECT '[1,2,3]');
 
--- Test UPDATE Statement
+INSERT INTO t VALUES ('[4,5,6]'), ('[7,8,9]');
+
+CREATE TABLE tmp (embedding VECTOR);
+INSERT INTO tmp SELECT embedding FROM t;
+SELECT * FROM tmp;
+embedding
+[1,2.1,3.3]
+[]
+NULL
+[4,5,6]
+[7,8,9]
+DROP TABLE tmp;
+
+-- Test statement: UPDATE
 
 UPDATE t SET embedding = VEC_FROM_TEXT('[1,2,3]') WHERE embedding = VEC_FROM_TEXT('[1,2.1,3.3]');
 BEGIN;
@@ -48,15 +70,14 @@ embedding
 UPDATE t SET embedding = NULL WHERE embedding = VEC_FROM_TEXT('[]');
 COMMIT;
 
--- Test DELETE Statement
+-- Test statement: DELETE
 
 DELETE FROM t WHERE embedding IS NULL;
 
--- Test SELECT Statement
+-- Test statement: SELECT
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t;
 embedding
-[1,2,3]
 [1,2,3]
 [4,5,6]
 [7,8,9]
@@ -67,7 +88,6 @@ TableReader	10000.00	root		data:TableFullScan
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t;
 embedding
 [1,2,3]
-[1,2,3]
 [4,5,6]
 [7,8,9]
 EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t;
@@ -75,11 +95,11 @@ id	estRows	task	access object	operator info
 TableReader	10000.00	root		data:TableFullScan
 └─TableFullScan	10000.00	cop[tiflash]	table:t	keep order:false, stats:pseudo
 
--- Test ANALYZE TABLE Statement
+-- Test statement: ANALYZE TABLE
 
 ANALYZE TABLE t;
 
--- Test ORDER BY Clause
+-- Test clause: ORDER BY
 
 DELETE FROM t WHERE 1 = 1;
 INSERT INTO t VALUES
@@ -88,7 +108,8 @@ INSERT INTO t VALUES
 ('[4.7, 4.9, 2.6, 5.2, 7.4]'),
 ('[7.7, 6.7, 8.3, 7.8, 5.7]'),
 ('[1.4, 4.5, 8.5, 7.7, 6.2]');
-SELECT * FROM t ORDER BY embedding DESC;
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t ORDER BY embedding DESC;
 embedding
 [8.7,5.7,7.7,9.8,1.5]
 [7.7,6.7,8.3,7.8,5.7]
@@ -96,7 +117,18 @@ embedding
 [3.6,9.7,2.4,6.6,4.9]
 [1.4,4.5,8.5,7.7,6.2]
 
--- Test VEC_DIMS() Function
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t ORDER BY embedding DESC;
+embedding
+[8.7,5.7,7.7,9.8,1.5]
+[7.7,6.7,8.3,7.8,5.7]
+[4.7,4.9,2.6,5.2,7.4]
+[3.6,9.7,2.4,6.6,4.9]
+[1.4,4.5,8.5,7.7,6.2]
+
+-- Test vector functions
+
+
+-- Test vector function: VEC_DIMS()
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ VEC_DIMS(embedding) FROM t;
 VEC_DIMS(embedding)
@@ -122,16 +154,14 @@ SELECT VEC_DIMS('[5, 3, 2]');
 VEC_DIMS('[5, 3, 2]')
 3
 
--- Test Vector VEC_FROM_TEXT() Function
+-- Test vector function: VEC_FROM_TEXT()
 
 SELECT VEC_FROM_TEXT('[]');
 VEC_FROM_TEXT('[]')
 []
 
--- Test IS Operators
+-- Test operator: IS
 
-DELETE FROM t WHERE 1 = 1;
-INSERT INTO t VALUES ('[1, 2, 3]'), ('[4, 5, 6]'), ('[7, 8, 9]');
 SELECT VEC_FROM_TEXT('[]') IS TRUE;
 VEC_FROM_TEXT('[]') IS TRUE
 0
@@ -148,7 +178,26 @@ SELECT VEC_FROM_TEXT('[]') IS NULL;
 VEC_FROM_TEXT('[]') IS NULL
 0
 
--- Test WHERE Clause
+-- Prepare test data
+
+DELETE FROM t WHERE 1 = 1;
+INSERT INTO t VALUES ('[1, 2, 3]'), ('[4, 5, 6]'), ('[7, 8, 9]'), (NULL), ('[]');
+
+-- Test clause: WHERE
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS NULL;
+embedding
+NULL
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS NULL;
+embedding
+NULL
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding = '[]';
+embedding
+[]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding = '[]';
+embedding
+[]
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding = VEC_FROM_TEXT('[1,2,3]');
 embedding
@@ -157,34 +206,45 @@ SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding = VEC_FROM_
 embedding
 [1,2,3]
 
--- Test Vector BETWEEN ... AND ... Operators
+DELETE FROM t WHERE t.embedding IS NULL OR t.embedding = '[]';
 
-SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding BETWEEN '[1, 2, 3]' AND '[4, 5, 6]';
+-- Test operator: BETWEEN ... AND ...
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding BETWEEN '[1,2,3]' AND '[4,5,6]';
 embedding
 [1,2,3]
 [4,5,6]
-SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding BETWEEN '[1, 2, 3]' AND '[4, 5, 6]';
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding BETWEEN '[1,2,3]' AND '[4,5,6]';
 embedding
 [1,2,3]
 [4,5,6]
 
--- Test IN / NOT IN Operators
+-- Test operator: IN / NOT IN
 
-SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IN ('[1, 2, 3]', '[4, 5, 6]');
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
 Error 1105 (HY000): VectorFloat32 is not supported for IN()
-SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IN ('[1, 2, 3]', '[4, 5, 6]');
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
 Error 1105 (HY000): VectorFloat32 is not supported for IN()
-SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IN ('[1, 2, 3]', '[4, 5, 6]');
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
 Error 1105 (HY000): VectorFloat32 is not supported for IN()
-SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding NOT IN ('[1, 2, 3]', '[4, 5, 6]');
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding NOT IN ('[1,2,3]', '[4,5,6]');
 Error 1105 (HY000): VectorFloat32 is not supported for IN()
 
--- Test Vector Arithmetic Operators
+-- Test clause: HAVING
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t GROUP BY embedding HAVING embedding > VEC_FROM_TEXT('[4,5,6]') ORDER BY embedding;
+embedding
+[7,8,9]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t GROUP BY embedding HAVING embedding > VEC_FROM_TEXT('[4,5,6]') ORDER BY embedding;
+embedding
+[7,8,9]
+
+-- Test arithmetic operators: + / - / * / /
 
 SELECT VEC_FROM_TEXT('[1,2]') + VEC_FROM_TEXT('[2,3]');
 Error 1105 (HY000): Vector does not support plus operator
 
--- Test Comparison Operators
+-- Test comparison operators
 
 SELECT VEC_FROM_TEXT('[]') = VEC_FROM_TEXT('[]');
 VEC_FROM_TEXT('[]') = VEC_FROM_TEXT('[]')
@@ -235,7 +295,10 @@ SELECT VEC_FROM_TEXT('[1, 2, 3]') <= '[1]';
 VEC_FROM_TEXT('[1, 2, 3]') <= '[1]'
 0
 
--- Test CAST() Operator
+-- Test comparison functions/operators
+
+
+-- Test conversion operator: CAST()
 
 SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS BINARY);
 CAST(VEC_FROM_TEXT('[1,2,3]') AS BINARY)
@@ -274,7 +337,7 @@ CAST('[1,2,3]' AS VECTOR<FLOAT>)
 SELECT CAST('[1,2,3]' AS VECTOR<DOUBLE>);
 Error 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your TiDB version for the right syntax to use line 1 column 40 near ");"Only VECTOR<FLOAT> is supported for now 
 
--- Test CONVERT() Function
+-- Test conversion function: CONVERT()
 
 SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), BINARY);
 CONVERT(VEC_FROM_TEXT('[1,2,3]'), BINARY)
@@ -313,7 +376,64 @@ CONVERT('[1,2,3]', VECTOR<FLOAT>)
 SELECT CONVERT('[1,2,3]', VECTOR<DOUBLE>);
 Error 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your TiDB version for the right syntax to use line 1 column 41 near ");"Only VECTOR<FLOAT> is supported for now 
 
--- Test Aggregate Function
+-- Test control flow functions
+
+
+-- Test flow function function: IF()
+
+SELECT IF(VEC_FROM_TEXT('[1, 2, 3]'), 1, 0) AS result;
+result
+1
+SELECT IF(TRUE, VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]')) AS result;
+Error 1105 (HY000): VectorFloat32 is not supported for IF()
+
+-- Test flow function function: IFNULL()
+
+SELECT IFNULL(VEC_FROM_TEXT('[1, 2, 3]'), 1) AS result;
+result
+[1,2,3]
+SELECT IFNULL(NULL, VEC_FROM_TEXT('[1, 2, 3]')) AS result;
+Error 1105 (HY000): VectorFloat32 is not supported for IFNULL()
+
+-- Test flow function function: NULLIF()
+
+SELECT NULLIF(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[1, 2, 3]')) AS result;
+Error 1105 (HY000): VectorFloat32 is not supported for IF()
+SELECT NULLIF(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]')) AS result;
+Error 1105 (HY000): VectorFloat32 is not supported for IF()
+
+-- Test flow function operator: CASE WHEN
+
+SELECT CASE WHEN TRUE THEN VEC_FROM_TEXT('[1, 2, 3]') ELSE VEC_FROM_TEXT('[4, 5, 6]') END AS result;
+Error 1105 (HY000): VectorFloat32 is not supported for CASE WHEN
+
+-- Test comparison functions
+
+
+-- Test comparison function: GREATEST()
+
+SELECT GREATEST(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]'), VEC_FROM_TEXT('[7, 8, 9]')) AS result;
+Error 1105 (HY000): unsupported type VectorFloat32 during evaluation
+
+-- Test comparison function: LEAST()
+
+SELECT LEAST(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]'), VEC_FROM_TEXT('[7, 8, 9]')) AS result;
+Error 1105 (HY000): unsupported type VectorFloat32 during evaluation
+
+-- Test comparison function: COALESCE()
+
+SELECT COALESCE(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]')) AS result;
+Error 1105 (HY000): VectorFloat32 is not supported for COALESCE()
+SELECT COALESCE(NULL, VEC_FROM_TEXT('[1, 2, 3]')) AS result;
+Error 1105 (HY000): VectorFloat32 is not supported for COALESCE()
+SELECT COALESCE(VEC_FROM_TEXT('[1, 2, 3]'), 1) AS result;
+result
+[1,2,3]
+SELECT COALESCE(VEC_FROM_TEXT('[1, 2, 3]'), '1') AS result;
+result
+[1,2,3]
+
+-- Prepare test data
 
 DELETE FROM t WHERE 1 = 1;
 INSERT INTO t VALUES
@@ -324,7 +444,10 @@ INSERT INTO t VALUES
 ('[7.7, 6.7, 8.3, 7.8, 5.7]'),
 ('[1.4, 4.5, 8.5, 7.7, 6.2]');
 
--- Test COUNT() Function
+-- Test aggregate functions
+
+
+-- Test aggregate function: COUNT()
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ COUNT(embedding) FROM t;
 COUNT(embedding)
@@ -353,7 +476,7 @@ SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ COUNT(DISTINCT embedding) FROM t;
 COUNT(DISTINCT embedding)
 5
 
--- Test MIN() / MAX() Function
+-- Test aggregate function: MIN()
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ MIN(embedding) FROM t;
 MIN(embedding)
@@ -361,6 +484,9 @@ MIN(embedding)
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ MIN(embedding) FROM t;
 MIN(embedding)
 [1.4,4.5,8.5,7.7,6.2]
+
+-- Test aggregate function: MAX()
+
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ MAX(embedding) FROM t;
 MAX(embedding)
 [8.7,5.7,7.7,9.8,1.5]
@@ -368,34 +494,26 @@ SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ MAX(embedding) FROM t;
 MAX(embedding)
 [8.7,5.7,7.7,9.8,1.5]
 
--- Test SUM() / AVG() Function
+-- Test aggregate function: SUM()
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ SUM(embedding) FROM t;
 Error 1105 (HY000): cannot cast from vector<float> to double
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ SUM(embedding) FROM t;
 Error 1105 (HY000): cannot cast from vector<float> to double
+
+-- Test aggregate function: AVG()
+
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ AVG(embedding) FROM t;
 Error 1105 (HY000): cannot cast from vector<float> to double
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ AVG(embedding) FROM t;
 Error 1105 (HY000): cannot cast from vector<float> to double
 
--- Test HAVING Clause
-
-SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t GROUP BY embedding HAVING embedding > VEC_FROM_TEXT('[4.7,4.9,2.6,5.2,7.4]') ORDER BY embedding;
-embedding
-[7.7,6.7,8.3,7.8,5.7]
-[8.7,5.7,7.7,9.8,1.5]
-SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t GROUP BY embedding HAVING embedding > VEC_FROM_TEXT('[4.7,4.9,2.6,5.2,7.4]') ORDER BY embedding;
-embedding
-[7.7,6.7,8.3,7.8,5.7]
-[8.7,5.7,7.7,9.8,1.5]
-
--- Test Window Function
+-- Test window function
 
 DELETE FROM t WHERE 1 = 1;
 INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,601]'), ('[4,5,61]');
 
--- Test FIRST_VALUE() / LAST_VALUE() / NTH_VALUE() Window Function
+-- Test window functions: FIRST_VALUE() / LAST_VALUE() / NTH_VALUE()
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t WINDOW w AS (ORDER BY embedding)ORDER BY embedding;
 embedding	first	second	last
@@ -407,10 +525,13 @@ embedding	first	second	last
 [1,2,3]	[1,2,3]	NULL	[1,2,3]
 [4,5,61]	[1,2,3]	[4,5,61]	[4,5,61]
 [4,5,601]	[1,2,3]	[4,5,61]	[4,5,601]
+
+-- Prepare test data
+
 DELETE FROM t WHERE 1 = 1;
 INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,6]'), ('[4,5,6]'), ('[7,8,9]');
 
--- Test ROW_NUMBER() / RANK() / DENSE_RANK() Window Function
+-- Test window functions: ROW_NUMBER() / RANK() / DENSE_RANK()
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, ROW_NUMBER() OVER w AS 'row_num', RANK() OVER w AS 'rank', DENSE_RANK() OVER w AS 'dense_rank' FROM t WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
 embedding	row_num	rank	dense_rank
@@ -425,7 +546,7 @@ embedding	row_num	rank	dense_rank
 [4,5,6]	3	2	2
 [7,8,9]	4	4	3
 
--- Test LAG() / LEAD() Window Function
+-- Test window functions: LAG() / LEAD()
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, LAG(embedding) OVER w AS 'lag', LEAD(embedding) OVER w AS 'lead' FROM t WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
 embedding	lag	lead
@@ -440,7 +561,7 @@ embedding	lag	lead
 [4,5,6]	[4,5,6]	[7,8,9]
 [7,8,9]	[4,5,6]	NULL
 
--- Test PARTITION BY / ORDER BY Clause in Window Function
+-- Test window function clause: PARTITION BY / ORDER BY
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, ROW_NUMBER() OVER (PARTITION BY embedding ORDER BY embedding) AS 'row_num' FROM t ORDER BY embedding;
 embedding	row_num
@@ -455,6 +576,168 @@ embedding	row_num
 [4,5,6]	2
 [7,8,9]	1
 
--- Test TRUNCATE TABLE Statement
+-- Test statement: SHOW CREATE TABLE
 
-TRUNCATE TABLE t;
+SHOW CREATE TABLE t;
+Table	Create Table
+t	CREATE TABLE `t` (
+  `embedding` vector<float> DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin
+
+-- Test statement: DESC
+
+DESC t;
+Field	Type	Null	Key	Default	Extra
+embedding	vector<float>	YES		NULL	
+
+-- Test table: INFORMATION_SCHEMA.COLUMNS
+
+SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 't';
+TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	COLUMN_NAME	ORDINAL_POSITION	COLUMN_DEFAULT	IS_NULLABLE	DATA_TYPE	CHARACTER_MAXIMUM_LENGTH	CHARACTER_OCTET_LENGTH	NUMERIC_PRECISION	NUMERIC_SCALE	DATETIME_PRECISION	CHARACTER_SET_NAME	COLLATION_NAME	COLUMN_TYPE	COLUMN_KEY	EXTRA	PRIVILEGES	COLUMN_COMMENT	GENERATION_EXPRESSION
+def	vector	t	embedding	1	NULL	YES	vector<float>	NULL	NULL	NULL	NULL	NULL	NULL	NULL	vector<float>			select,insert,update,references		
+
+-- Test statement: TRUNCATE TABLE
+
+CREATE TABLE t3 (embedding VECTOR);
+INSERT INTO t3 VALUES ('[1,2,3]'), ('[4,5,6]'), ('[7,8,9]');
+SELECT embedding FROM t3;
+embedding
+[1,2,3]
+[4,5,6]
+[7,8,9]
+TRUNCATE TABLE t3;
+SELECT embedding FROM t3;
+embedding
+DROP TABLE t3;
+
+-- Test feature: TEMPORARY TABLE
+
+CREATE TEMPORARY TABLE t3 (embedding VECTOR);
+INSERT INTO t3 VALUES ('[1,2,3]'), ('[4,5,6]'), ('[7,8,9]');
+SELECT * FROM t3;
+embedding
+[1,2,3]
+[4,5,6]
+[7,8,9]
+DROP TABLE t3;
+
+-- Test DDL: VECTOR column with NOT NULL flag
+
+CREATE TABLE t3 (id INT, embedding VECTOR NOT NULL);
+INSERT INTO t3 VALUES (1, '[1,2,3]'), (2, '[4,5,6]'), (3, '[7,8,9]');
+INSERT INTO t3 VALUES (4, '[]');
+INSERT INTO t3 VALUES (4, NULL);
+Error 1048 (23000): Column 'embedding' cannot be null
+DROP TABLE t3;
+
+-- Test DDL: VECTOR column with DEFAULT flag
+
+CREATE TABLE t3 (id INT, embedding VECTOR NOT NULL DEFAULT '[0,0,0]');
+INSERT INTO t3(id) VALUES (1);
+SELECT * FROM t3 WHERE id = 1;
+id	embedding
+1	[0,0,0]
+DROP TABLE t3;
+
+-- Test feature: SubQuery
+
+-- Test SubQuery type: using sub-query as scalar
+SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ t1.embedding, (SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ MAX(t2.embedding) FROM t2) AS max_in_t2 FROM t1;
+embedding	max_in_t2
+[1,2,3]	[7,8,9]
+[4,5,6]	[7,8,9]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ t1.embedding, (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ MAX(t2.embedding) FROM t2) AS max_in_t2 FROM t1;
+embedding	max_in_t2
+[1,2,3]	[7,8,9]
+[4,5,6]	[7,8,9]
+
+-- Test SubQuery type: using sub-query as derived table
+SELECT embedding FROM (SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ embedding FROM t1 ORDER BY embedding LIMIT 1) derived_table;
+embedding
+[1,2,3]
+SELECT embedding FROM (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ embedding FROM t1 ORDER BY embedding LIMIT 1) derived_table;
+embedding
+[1,2,3]
+
+-- Test SubQuery type: using sub-query in the existential test
+SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ t1.embedding FROM t1 WHERE EXISTS(SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ 1 FROM t2 WHERE t1.embedding = t2.embedding);
+embedding
+[4,5,6]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ t1.embedding FROM t1 WHERE EXISTS(SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ 1 FROM t2 WHERE t1.embedding = t2.embedding);
+embedding
+[4,5,6]
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ t1.embedding FROM t1 WHERE t1.embedding NOT IN (SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ t2.embedding FROM t2);
+embedding
+[1,2,3]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ t1.embedding FROM t1 WHERE t1.embedding NOT IN (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ t2.embedding FROM t2);
+embedding
+[1,2,3]
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ t1.embedding FROM t1 WHERE t1.embedding IN (SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ t2.embedding FROM t2);
+embedding
+[4,5,6]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ t1.embedding FROM t1 WHERE t1.embedding IN (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ t2.embedding FROM t2);
+embedding
+[4,5,6]
+
+-- Test SubQuery type: using sub-query in the quantified comparison
+SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ t1.embedding FROM t1 WHERE t1.embedding = ANY(SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ t2.embedding FROM t2);
+embedding
+[4,5,6]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ t1.embedding FROM t1 WHERE t1.embedding = ANY(SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ t2.embedding FROM t2);
+embedding
+[4,5,6]
+
+-- Test SubQuery type: using sub-query as operands of operators
+SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ t2.embedding FROM t2 WHERE t2.embedding > (SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ MAX(t1.embedding) FROM t1);
+embedding
+[7,8,9]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ t2.embedding FROM t2 WHERE t2.embedding > (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ MAX(t1.embedding) FROM t1);
+embedding
+[7,8,9]
+
+
+-- Test clause: UNION / EXCEPT / INTERSECT
+
+SELECT t1.embedding FROM t1 UNION SELECT t2.embedding FROM t2;
+embedding
+[1,2,3]
+[4,5,6]
+[7,8,9]
+SELECT t1.embedding FROM t1 UNION ALL SELECT t2.embedding FROM t2;
+embedding
+[1,2,3]
+[4,5,6]
+[4,5,6]
+[7,8,9]
+SELECT t1.embedding FROM t1 EXCEPT SELECT t2.embedding FROM t2;
+embedding
+[1,2,3]
+SELECT t1.embedding FROM t1 INTERSECT SELECT t2.embedding FROM t2;
+embedding
+[4,5,6]
+
+-- Test clause: JOIN
+
+SELECT t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+embedding	embedding
+[4,5,6]	[4,5,6]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+embedding	embedding
+[4,5,6]	[4,5,6]
+
+-- Test feature: CTE
+
+WITH t1 AS (SELECT * FROM t1), t2 AS (SELECT * FROM t2) SELECT * FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+id	embedding	id	embedding
+2	[4,5,6]	3	[4,5,6]
+
+-- Test feature: Prepared Statement
+
+PREPARE stmt FROM 'SELECT * FROM t1 WHERE embedding = ?';
+SET @a = VEC_FROM_TEXT('[1,2,3]');
+EXECUTE stmt USING @a;
+id	embedding
+1	[1,2,3]
+DEALLOCATE PREPARE stmt;
