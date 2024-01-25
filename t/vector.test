@@ -298,21 +298,21 @@ SELECT CONVERT('[1,2,3]', VECTOR<DOUBLE>);
 -- echo
 
 -- echo
--- echo -- Test flow function function: IF()
+-- echo -- Test control flow function: IF()
 -- echo
 SELECT IF(VEC_FROM_TEXT('[1, 2, 3]'), 1, 0) AS result;
 -- error ER_UNKNOWN_ERROR
 SELECT IF(TRUE, VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]')) AS result;
 
 -- echo
--- echo -- Test flow function function: IFNULL()
+-- echo -- Test control flow function: IFNULL()
 -- echo
 SELECT IFNULL(VEC_FROM_TEXT('[1, 2, 3]'), 1) AS result;
 -- error ER_UNKNOWN_ERROR
 SELECT IFNULL(NULL, VEC_FROM_TEXT('[1, 2, 3]')) AS result;
 
 -- echo
--- echo -- Test flow function function: NULLIF()
+-- echo -- Test control flow function: NULLIF()
 -- echo
 -- error ER_UNKNOWN_ERROR
 SELECT NULLIF(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[1, 2, 3]')) AS result;
