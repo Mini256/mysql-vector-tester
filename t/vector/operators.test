@@ -1,0 +1,132 @@
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 1;
+
+-- echo
+-- echo -- Create a table with VECTOR type column and enable TiFlash replica.
+DROP TABLE IF EXISTS t;
+CREATE TABLE t (embedding VECTOR);
+
+-- echo
+-- echo -- Analyze the table.
+-- echo
+ANALYZE TABLE t;
+
+-- echo
+-- echo -- Add TiFlash replica.
+-- echo
+ALTER TABLE t SET TIFLASH REPLICA 1;
+SELECT SLEEP(60);
+SELECT AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t') ORDER BY TABLE_NAME;
+
+-- echo
+-- echo -- Test operator: IS
+
+DELETE FROM t WHERE 1 = 1;
+INSERT INTO t VALUES ('[1,2,3]'), ('[]'), (NULL);
+
+-- echo
+SELECT VEC_FROM_TEXT('[]') IS TRUE;
+SELECT VEC_FROM_TEXT('[]') IS FALSE;
+SELECT VEC_FROM_TEXT('[]') IS UNKNOWN;
+
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS TRUE;
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS TRUE;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS TRUE;
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS TRUE;
+
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS FALSE;
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS FALSE;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS FALSE;
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS FALSE;
+
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS UNKNOWN;
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS UNKNOWN;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS UNKNOWN;
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS UNKNOWN;
+
+-- echo
+SELECT VEC_FROM_TEXT('[]') IS NOT NULL;
+SELECT VEC_FROM_TEXT('[]') IS NULL;
+
+-- echo
+-- echo -- Test arithmetic operators: + / - / * / /
+-- echo
+
+DELETE FROM t WHERE 1 = 1;
+INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,6]'), ('[7,8,9]');
+
+-- echo
+SELECT VEC_FROM_TEXT('[1,2]') + '[2,3]';
+
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ t.embedding + '[1,2,3]' FROM t;
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ t.embedding + '[1,2,3]' FROM t;
+
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ t.embedding + t.embedding FROM t;
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ t.embedding + t.embedding FROM t;
+
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ t.embedding + 1 FROM t;
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ t.embedding + 1 FROM t;
+
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ t.embedding + '[]' FROM t;
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ t.embedding + '[]' FROM t;
+
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ t.embedding + '[1]' FROM t;
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ t.embedding + '[1]' FROM t;
+
+-- echo
+SELECT VEC_FROM_TEXT('[2,3,4]') - '[1,2,3]';
+
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ t.embedding - '[1,2,3]' FROM t;
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ t.embedding - '[1,2,3]' FROM t;
+
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ t.embedding - t.embedding FROM t;
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ t.embedding - t.embedding FROM t;
+
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding + '[1,1,1]' = '[2,3,4]';
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding + '[1,1,1]' = '[2,3,4]';
+
+-- echo
+-- echo -- Test comparison operators
+
+-- echo
+SELECT VEC_FROM_TEXT('[]') = VEC_FROM_TEXT('[]');
+SELECT VEC_FROM_TEXT('[]') != VEC_FROM_TEXT('[]');
+SELECT VEC_FROM_TEXT('[]') > VEC_FROM_TEXT('[]');
+SELECT VEC_FROM_TEXT('[]') >= VEC_FROM_TEXT('[]');
+SELECT VEC_FROM_TEXT('[]') < VEC_FROM_TEXT('[]');
+SELECT VEC_FROM_TEXT('[]') <= VEC_FROM_TEXT('[]');
+
+-- echo
+SELECT VEC_FROM_TEXT('[1, 2, 3]') = VEC_FROM_TEXT('[1, 2, 3]');
+SELECT VEC_FROM_TEXT('[1, 2, 3]') != VEC_FROM_TEXT('[1, 2, 3]');
+
+-- echo
+SELECT VEC_FROM_TEXT('[1, 2, 3]') > VEC_FROM_TEXT('[1]');
+SELECT VEC_FROM_TEXT('[1, 2, 3]') >= VEC_FROM_TEXT('[1]');
+SELECT VEC_FROM_TEXT('[1, 2, 3]') < VEC_FROM_TEXT('[1]');
+SELECT VEC_FROM_TEXT('[1, 2, 3]') <= VEC_FROM_TEXT('[1]');
+
+-- echo
+SELECT VEC_FROM_TEXT('[1, 2, 3]') > '[1]';
+SELECT VEC_FROM_TEXT('[1, 2, 3]') >= '[1]';
+SELECT VEC_FROM_TEXT('[1, 2, 3]') < '[1]';
+SELECT VEC_FROM_TEXT('[1, 2, 3]') <= '[1]';

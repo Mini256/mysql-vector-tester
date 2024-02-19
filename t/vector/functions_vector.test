@@ -1,0 +1,324 @@
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = ON;
+
+-- echo
+-- echo -- Create a table with VECTOR type column and enable TiFlash replica.
+-- echo
+
+DROP TABLE IF EXISTS t;
+CREATE TABLE t (embedding VECTOR);
+INSERT INTO t VALUES ('[1.1,2.2,3.3]'), ('[4.4,5.5,6.6]'), ('[7.7,8.8,9.9]');
+
+-- echo
+-- echo -- Analyze the table.
+-- echo
+
+ANALYZE TABLE t;
+
+-- echo
+-- echo -- Add TiFlash replica.
+-- echo
+
+
+ALTER TABLE t SET TIFLASH REPLICA 1;
+SELECT SLEEP(60);
+SELECT AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t') ORDER BY TABLE_NAME;
+
+
+-- echo
+-- echo -- Test vector function: VEC_DIMS()
+-- echo
+
+
+SELECT VEC_DIMS(NULL);
+-- echo
+SELECT VEC_DIMS('[]');
+-- echo
+SELECT VEC_DIMS('[5, 3, 2]');
+-- echo
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+
+
+-- echo
+-- echo -- Test vector function: VEC_FROM_TEXT()
+-- echo
+
+SELECT VEC_FROM_TEXT('[]');
+
+-- echo
+-- echo -- Test function: VEC_FROM_TEXT
+-- echo
+SELECT VEC_FROM_TEXT('[1,2,3]') + '[4,5,6]';
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT VEC_FROM_TEXT('[3e38]') + '[3e38]';
+-- echo
+SELECT VEC_FROM_TEXT('[1,2,3]') - '[4,5,6]';
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT VEC_FROM_TEXT('[-3e38]') - '[3e38]';
+-- echo
+SELECT VEC_FROM_TEXT('[1,2,3]') * '[4,5,6]';
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT VEC_FROM_TEXT('[1e37]') * '[1e37]';
+-- echo
+-- echo -- FIXME: check underflow
+SELECT VEC_FROM_TEXT('[1e-37]') * '[1e-37]';
+
+
+-- echo
+-- echo -- Test function: VEC_L2_NORM()
+-- echo
+
+
+SELECT ROUND(CAST(VEC_L2_NORM('[1,1]') AS DECIMAL(10,6)), 5);
+-- echo
+SELECT VEC_L2_NORM('[3,4]');
+-- echo
+SELECT VEC_L2_NORM('[0,1]');
+-- echo
+-- echo -- Note: PGVector output 5e+37
+SELECT CAST(VEC_L2_NORM('[3e37,4e37]') AS REAL);
+-- echo
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */  VEC_L2_NORM(embedding) FROM t;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */  VEC_L2_NORM(embedding) FROM t;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */  VEC_L2_NORM(embedding) FROM t;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */  VEC_L2_NORM(embedding) FROM t;
+
+
+-- echo
+-- echo -- Test function: VEC_L2_DISTANCE()
+-- echo
+
+
+SELECT VEC_L2_DISTANCE('[0,0]', '[3,4]');
+-- echo
+SELECT VEC_L2_DISTANCE('[0,0]', '[0,1]');
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT VEC_L2_DISTANCE('[1,2]', '[3]');
+-- echo
+-- echo -- FIXME: should output NULL instead of 0
+SELECT VEC_L2_DISTANCE('[3e38]', '[-3e38]');
+-- echo
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_L2_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_L2_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_L2_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_L2_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+-- echo
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- echo
+-- echo
+-- echo -- FIXME: the behavior to handle VEC_L2_DISTANCE(embedding, NULL) is different
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L2_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L2_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
+-- echo
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;
+-- echo
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[1]') AS d FROM t ORDER BY d;
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[1]') AS d FROM t ORDER BY d;
+
+
+-- echo
+-- echo -- Test function: VEC_NEGATIVE_INNER_PRODUCT()
+-- echo
+
+
+SELECT VEC_NEGATIVE_INNER_PRODUCT('[1,2]', '[3,4]');
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT VEC_NEGATIVE_INNER_PRODUCT('[1,2]', '[3]');
+-- echo
+-- echo -- FIXME: should output NULL instead of 0
+SELECT VEC_NEGATIVE_INNER_PRODUCT('[3e38]', '[3e38]');
+-- echo
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- echo
+-- echo
+-- echo -- FIXME: the behavior to handle VEC_NEGATIVE_INNER_PRODUCT(embedding, NULL) is different
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, NULL) AS d FROM t ORDER BY d;
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, NULL) AS d FROM t ORDER BY d;
+-- echo
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[]') AS d FROM t ORDER BY d;
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[]') AS d FROM t ORDER BY d;
+-- echo
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[1]') AS d FROM t ORDER BY d;
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[1]') AS d FROM t ORDER BY d;
+
+
+-- echo
+-- echo -- Test function: VEC_COSINE_DISTANCE()
+-- echo
+
+
+-- echo
+SELECT VEC_COSINE_DISTANCE('[1,2]', '[2,4]');
+-- echo -- Note: PGVector output NaN, but MySQL doesn't support NaN, so output NULL
+SELECT VEC_COSINE_DISTANCE('[1,2]', '[0,0]');
+-- echo
+SELECT VEC_COSINE_DISTANCE('[1,1]', '[1,1]');
+-- echo
+SELECT VEC_COSINE_DISTANCE('[1,0]', '[0,2]');
+-- echo
+SELECT VEC_COSINE_DISTANCE('[1,1]', '[-1,-1]');
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT VEC_COSINE_DISTANCE('[1,2]', '[3]');
+-- echo
+SELECT VEC_COSINE_DISTANCE('[1,1]', '[1.1,1.1]');
+-- echo
+SELECT VEC_COSINE_DISTANCE('[1,1]', '[-1.1,-1.1]');
+-- echo
+-- echo -- Note: PGVector output NaN, but MySQL doesn't support NaN, so output NULL
+SELECT VEC_COSINE_DISTANCE('[3e38]', '[3e38]');
+
+-- echo -- Test VEC_COSINE_DISTANCE() Push Down
+
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_COSINE_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_COSINE_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_COSINE_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_COSINE_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+-- echo
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- echo
+-- echo
+-- echo -- FIXME: the behavior to handle VEC_COSINE_DISTANCE(embedding, NULL) is different
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
+-- echo
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;
+-- echo
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[1]') AS d FROM t ORDER BY d;
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[1]') AS d FROM t ORDER BY d;
+
+
+-- echo
+-- echo -- Test function: VEC_L1_DISTANCE()
+-- echo
+
+
+SELECT VEC_L1_DISTANCE('[0,0]', '[3,4]');
+-- echo
+SELECT VEC_L1_DISTANCE('[0,0]', '[0,1]');
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT VEC_L1_DISTANCE('[1,2]', '[3]');
+-- echo
+-- echo -- FIXME: should output NULL instead of 0
+SELECT VEC_L1_DISTANCE('[3e38]', '[-3e38]');
+
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_L1_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_L1_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_L1_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_L1_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+-- echo
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+-- echo
+-- echo
+-- echo -- FIXME: the behavior to handle VEC_L1_DISTANCE(embedding, NULL) is different
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L1_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L1_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
+-- echo
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;
+-- echo
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[1]') AS d FROM t ORDER BY d;
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[1]') AS d FROM t ORDER BY d;

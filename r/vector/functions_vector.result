@@ -1,0 +1,514 @@
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = ON;
+
+-- Create a table with VECTOR type column and enable TiFlash replica.
+
+DROP TABLE IF EXISTS t;
+CREATE TABLE t (embedding VECTOR);
+INSERT INTO t VALUES ('[1.1,2.2,3.3]'), ('[4.4,5.5,6.6]'), ('[7.7,8.8,9.9]');
+
+-- Analyze the table.
+
+ANALYZE TABLE t;
+
+-- Add TiFlash replica.
+
+ALTER TABLE t SET TIFLASH REPLICA 1;
+SELECT SLEEP(60);
+SLEEP(60)
+0
+SELECT AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t') ORDER BY TABLE_NAME;
+AVAILABLE	PROGRESS
+1	1
+
+-- Test vector function: VEC_DIMS()
+
+SELECT VEC_DIMS(NULL);
+VEC_DIMS(NULL)
+NULL
+
+SELECT VEC_DIMS('[]');
+VEC_DIMS('[]')
+0
+
+SELECT VEC_DIMS('[5, 3, 2]');
+VEC_DIMS('[5, 3, 2]')
+3
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+VEC_DIMS(embedding)
+3
+3
+3
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+id	estRows	task	access object	operator info
+Projection	6.00	root	NULL	Column#3
+└─Sort	6.00	root	NULL	vector__functions_vector.t.embedding
+  └─Projection	6.00	root	NULL	vec_dims(vector__functions_vector.t.embedding)->Column#3, vector__functions_vector.t.embedding
+    └─TableReader	6.00	root	NULL	data:TableFullScan
+      └─TableFullScan	6.00	cop[tikv]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+VEC_DIMS(embedding)
+3
+3
+3
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ VEC_DIMS(embedding) FROM t ORDER BY embedding;
+id	estRows	task	access object	operator info
+Projection	6.00	root	NULL	Column#3
+└─Sort	6.00	root	NULL	vector__functions_vector.t.embedding
+  └─TableReader	6.00	root	NULL	MppVersion:<num>, data:ExchangeSender
+    └─ExchangeSender	6.00	mpp[tiflash]	NULL	ExchangeType: PassThrough
+      └─Projection	6.00	mpp[tiflash]	NULL	vec_dims(vector__functions_vector.t.embedding)->Column#3, vector__functions_vector.t.embedding
+        └─TableFullScan	6.00	mpp[tiflash]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+embedding
+[1.1,2.2,3.3]
+[4.4,5.5,6.6]
+[7.7,8.8,9.9]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+id	estRows	task	access object	operator info
+Sort	4.80	root	NULL	vector__functions_vector.t.embedding
+└─TableReader	4.80	root	NULL	data:Selection
+  └─Selection	4.80	cop[tikv]	NULL	eq(vec_dims(vector__functions_vector.t.embedding), 3)
+    └─TableFullScan	6.00	cop[tikv]	table:t	keep order:false, stats:partial[embedding:allEvicted]
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+embedding
+[1.1,2.2,3.3]
+[4.4,5.5,6.6]
+[7.7,8.8,9.9]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_DIMS(embedding) = 3 ORDER BY embedding;
+id	estRows	task	access object	operator info
+Sort	4.80	root	NULL	vector__functions_vector.t.embedding
+└─TableReader	4.80	root	NULL	MppVersion:<num>, data:ExchangeSender
+  └─ExchangeSender	4.80	mpp[tiflash]	NULL	ExchangeType: PassThrough
+    └─Selection	4.80	mpp[tiflash]	NULL	eq(vec_dims(vector__functions_vector.t.embedding), 3)
+      └─TableFullScan	6.00	mpp[tiflash]	table:t	pushed down filter:empty, keep order:false
+
+-- Test vector function: VEC_FROM_TEXT()
+
+SELECT VEC_FROM_TEXT('[]');
+VEC_FROM_TEXT('[]')
+[]
+
+-- Test function: VEC_FROM_TEXT
+
+SELECT VEC_FROM_TEXT('[1,2,3]') + '[4,5,6]';
+VEC_FROM_TEXT('[1,2,3]') + '[4,5,6]'
+[5,7,9]
+
+SELECT VEC_FROM_TEXT('[3e38]') + '[3e38]';
+Error 1105 (HY000): value out of range: overflow
+
+SELECT VEC_FROM_TEXT('[1,2,3]') - '[4,5,6]';
+VEC_FROM_TEXT('[1,2,3]') - '[4,5,6]'
+[-3,-3,-3]
+
+SELECT VEC_FROM_TEXT('[-3e38]') - '[3e38]';
+Error 1105 (HY000): value out of range: overflow
+
+SELECT VEC_FROM_TEXT('[1,2,3]') * '[4,5,6]';
+VEC_FROM_TEXT('[1,2,3]') * '[4,5,6]'
+[4,10,18]
+
+SELECT VEC_FROM_TEXT('[1e37]') * '[1e37]';
+Error 1105 (HY000): value out of range: overflow
+
+-- FIXME: check underflow
+SELECT VEC_FROM_TEXT('[1e-37]') * '[1e-37]';
+VEC_FROM_TEXT('[1e-37]') * '[1e-37]'
+[0]
+
+-- Test function: VEC_L2_NORM()
+
+SELECT ROUND(CAST(VEC_L2_NORM('[1,1]') AS DECIMAL(10,6)), 5);
+ROUND(CAST(VEC_L2_NORM('[1,1]') AS DECIMAL(10,6)), 5)
+1.41421
+
+SELECT VEC_L2_NORM('[3,4]');
+VEC_L2_NORM('[3,4]')
+5
+
+SELECT VEC_L2_NORM('[0,1]');
+VEC_L2_NORM('[0,1]')
+1
+
+-- Note: PGVector output 5e+37
+SELECT CAST(VEC_L2_NORM('[3e37,4e37]') AS REAL);
+CAST(VEC_L2_NORM('[3e37,4e37]') AS REAL)
+5.000000042966943e37
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */  VEC_L2_NORM(embedding) FROM t;
+VEC_L2_NORM(embedding)
+4.115823119079332
+9.65246080439508
+15.321226872105129
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */  VEC_L2_NORM(embedding) FROM t;
+id	estRows	task	access object	operator info
+Projection	6.00	root	NULL	vec_l2_norm(vector__functions_vector.t.embedding)->Column#3
+└─TableReader	6.00	root	NULL	data:TableFullScan
+  └─TableFullScan	6.00	cop[tikv]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */  VEC_L2_NORM(embedding) FROM t;
+VEC_L2_NORM(embedding)
+4.115823119079332
+9.65246080439508
+15.321226872105129
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */  VEC_L2_NORM(embedding) FROM t;
+id	estRows	task	access object	operator info
+TableReader	6.00	root	NULL	MppVersion:<num>, data:ExchangeSender
+└─ExchangeSender	6.00	mpp[tiflash]	NULL	ExchangeType: PassThrough
+  └─Projection	6.00	mpp[tiflash]	NULL	vec_l2_norm(vector__functions_vector.t.embedding)->Column#3
+    └─TableFullScan	6.00	mpp[tiflash]	table:t	keep order:false
+
+-- Test function: VEC_L2_DISTANCE()
+
+SELECT VEC_L2_DISTANCE('[0,0]', '[3,4]');
+VEC_L2_DISTANCE('[0,0]', '[3,4]')
+5
+
+SELECT VEC_L2_DISTANCE('[0,0]', '[0,1]');
+VEC_L2_DISTANCE('[0,0]', '[0,1]')
+1
+
+SELECT VEC_L2_DISTANCE('[1,2]', '[3]');
+Error 1105 (HY000): vectors have different dimensions: 2 and 1
+
+-- FIXME: should output NULL instead of 0
+SELECT VEC_L2_DISTANCE('[3e38]', '[-3e38]');
+VEC_L2_DISTANCE('[3e38]', '[-3e38]')
+0
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_L2_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+embedding
+[1.1,2.2,3.3]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_L2_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+id	estRows	task	access object	operator info
+TableReader	4.80	root	NULL	data:Selection
+└─Selection	4.80	cop[tikv]	NULL	eq(vec_l2_distance(vector__functions_vector.t.embedding, [1.1,2.2,3.3]), 0)
+  └─TableFullScan	6.00	cop[tikv]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_L2_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+embedding
+[1.1,2.2,3.3]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_L2_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+id	estRows	task	access object	operator info
+TableReader	4.80	root	NULL	MppVersion:<num>, data:ExchangeSender
+└─ExchangeSender	4.80	mpp[tiflash]	NULL	ExchangeType: PassThrough
+  └─Selection	4.80	mpp[tiflash]	NULL	eq(vec_l2_distance(vector__functions_vector.t.embedding, [1.1,2.2,3.3]), 0)
+    └─TableFullScan	6.00	mpp[tiflash]	table:t	pushed down filter:empty, keep order:false
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+embedding	d
+[4.4,5.5,6.6]	1.7804492689927414
+[1.1,2.2,3.3]	5.093132683727925
+[7.7,8.8,9.9]	6.763134927611031
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+id	estRows	task	access object	operator info
+Sort	6.00	root	NULL	Column#3
+└─Projection	6.00	root	NULL	vector__functions_vector.t.embedding, vec_l2_distance(vector__functions_vector.t.embedding, [5,5,5])->Column#3
+  └─TableReader	6.00	root	NULL	data:TableFullScan
+    └─TableFullScan	6.00	cop[tikv]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+embedding	d
+[4.4,5.5,6.6]	1.7804492689927414
+[1.1,2.2,3.3]	5.093132683727925
+[7.7,8.8,9.9]	6.763134927611031
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+id	estRows	task	access object	operator info
+Sort	6.00	root	NULL	Column#3
+└─TableReader	6.00	root	NULL	MppVersion:<num>, data:ExchangeSender
+  └─ExchangeSender	6.00	mpp[tiflash]	NULL	ExchangeType: PassThrough
+    └─Projection	6.00	mpp[tiflash]	NULL	vector__functions_vector.t.embedding, vec_l2_distance(vector__functions_vector.t.embedding, [5,5,5])->Column#3
+      └─TableFullScan	6.00	mpp[tiflash]	table:t	keep order:false
+
+
+-- FIXME: the behavior to handle VEC_L2_DISTANCE(embedding, NULL) is different
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L2_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
+embedding	d
+[1.1,2.2,3.3]	NULL
+[4.4,5.5,6.6]	NULL
+[7.7,8.8,9.9]	NULL
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L2_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
+Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 0, e.what() = DB::Exception,
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): vectors have different dimensions: 3 and 0
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 0, e.what() = DB::Exception,
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[1]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): vectors have different dimensions: 3 and 1
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[1]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 1, e.what() = DB::Exception,
+
+-- Test function: VEC_NEGATIVE_INNER_PRODUCT()
+
+SELECT VEC_NEGATIVE_INNER_PRODUCT('[1,2]', '[3,4]');
+VEC_NEGATIVE_INNER_PRODUCT('[1,2]', '[3,4]')
+-11
+
+SELECT VEC_NEGATIVE_INNER_PRODUCT('[1,2]', '[3]');
+Error 1105 (HY000): vectors have different dimensions: 2 and 1
+
+-- FIXME: should output NULL instead of 0
+SELECT VEC_NEGATIVE_INNER_PRODUCT('[3e38]', '[3e38]');
+VEC_NEGATIVE_INNER_PRODUCT('[3e38]', '[3e38]')
+0
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+embedding	d
+[7.7,8.8,9.9]	-132
+[4.4,5.5,6.6]	-82.5
+[1.1,2.2,3.3]	-33
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+id	estRows	task	access object	operator info
+Sort	6.00	root	NULL	Column#3
+└─Projection	6.00	root	NULL	vector__functions_vector.t.embedding, vec_negative_inner_product(vector__functions_vector.t.embedding, [5,5,5])->Column#3
+  └─TableReader	6.00	root	NULL	data:TableFullScan
+    └─TableFullScan	6.00	cop[tikv]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+embedding	d
+[7.7,8.8,9.9]	-132
+[4.4,5.5,6.6]	-82.5
+[1.1,2.2,3.3]	-33
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+id	estRows	task	access object	operator info
+Sort	6.00	root	NULL	Column#3
+└─TableReader	6.00	root	NULL	MppVersion:<num>, data:ExchangeSender
+  └─ExchangeSender	6.00	mpp[tiflash]	NULL	ExchangeType: PassThrough
+    └─Projection	6.00	mpp[tiflash]	NULL	vector__functions_vector.t.embedding, vec_negative_inner_product(vector__functions_vector.t.embedding, [5,5,5])->Column#3
+      └─TableFullScan	6.00	mpp[tiflash]	table:t	keep order:false
+
+
+-- FIXME: the behavior to handle VEC_NEGATIVE_INNER_PRODUCT(embedding, NULL) is different
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, NULL) AS d FROM t ORDER BY d;
+embedding	d
+[1.1,2.2,3.3]	NULL
+[4.4,5.5,6.6]	NULL
+[7.7,8.8,9.9]	NULL
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, NULL) AS d FROM t ORDER BY d;
+Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 0, e.what() = DB::Exception,
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): vectors have different dimensions: 3 and 0
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 0, e.what() = DB::Exception,
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[1]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): vectors have different dimensions: 3 and 1
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[1]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 1, e.what() = DB::Exception,
+
+-- Test function: VEC_COSINE_DISTANCE()
+
+
+SELECT VEC_COSINE_DISTANCE('[1,2]', '[2,4]');
+VEC_COSINE_DISTANCE('[1,2]', '[2,4]')
+0
+-- Note: PGVector output NaN, but MySQL doesn't support NaN, so output NULL
+SELECT VEC_COSINE_DISTANCE('[1,2]', '[0,0]');
+VEC_COSINE_DISTANCE('[1,2]', '[0,0]')
+NULL
+
+SELECT VEC_COSINE_DISTANCE('[1,1]', '[1,1]');
+VEC_COSINE_DISTANCE('[1,1]', '[1,1]')
+0
+
+SELECT VEC_COSINE_DISTANCE('[1,0]', '[0,2]');
+VEC_COSINE_DISTANCE('[1,0]', '[0,2]')
+1
+
+SELECT VEC_COSINE_DISTANCE('[1,1]', '[-1,-1]');
+VEC_COSINE_DISTANCE('[1,1]', '[-1,-1]')
+2
+
+SELECT VEC_COSINE_DISTANCE('[1,2]', '[3]');
+Error 1105 (HY000): vectors have different dimensions: 2 and 1
+
+SELECT VEC_COSINE_DISTANCE('[1,1]', '[1.1,1.1]');
+VEC_COSINE_DISTANCE('[1,1]', '[1.1,1.1]')
+0
+
+SELECT VEC_COSINE_DISTANCE('[1,1]', '[-1.1,-1.1]');
+VEC_COSINE_DISTANCE('[1,1]', '[-1.1,-1.1]')
+2
+
+-- Note: PGVector output NaN, but MySQL doesn't support NaN, so output NULL
+SELECT VEC_COSINE_DISTANCE('[3e38]', '[3e38]');
+VEC_COSINE_DISTANCE('[3e38]', '[3e38]')
+NULL
+-- Test VEC_COSINE_DISTANCE() Push Down
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_COSINE_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+embedding
+[1.1,2.2,3.3]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_COSINE_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+id	estRows	task	access object	operator info
+TableReader	4.80	root	NULL	data:Selection
+└─Selection	4.80	cop[tikv]	NULL	eq(vec_cosine_distance(vector__functions_vector.t.embedding, [1.1,2.2,3.3]), 0)
+  └─TableFullScan	6.00	cop[tikv]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_COSINE_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+embedding
+[1.1,2.2,3.3]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_COSINE_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+id	estRows	task	access object	operator info
+TableReader	4.80	root	NULL	MppVersion:<num>, data:ExchangeSender
+└─ExchangeSender	4.80	mpp[tiflash]	NULL	ExchangeType: PassThrough
+  └─Selection	4.80	mpp[tiflash]	NULL	eq(vec_cosine_distance(vector__functions_vector.t.embedding, [1.1,2.2,3.3]), 0)
+    └─TableFullScan	6.00	mpp[tiflash]	table:t	pushed down filter:empty, keep order:false
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+embedding	d
+[7.7,8.8,9.9]	0.0051679725589453
+[4.4,5.5,6.6]	0.01307244786238404
+[1.1,2.2,3.3]	0.07417991482134656
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+id	estRows	task	access object	operator info
+Sort	6.00	root	NULL	Column#3
+└─Projection	6.00	root	NULL	vector__functions_vector.t.embedding, vec_cosine_distance(vector__functions_vector.t.embedding, [5,5,5])->Column#3
+  └─TableReader	6.00	root	NULL	data:TableFullScan
+    └─TableFullScan	6.00	cop[tikv]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+embedding	d
+[7.7,8.8,9.9]	0.0051679725589453
+[4.4,5.5,6.6]	0.01307244786238404
+[1.1,2.2,3.3]	0.07417991482134656
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+id	estRows	task	access object	operator info
+Sort	6.00	root	NULL	Column#3
+└─TableReader	6.00	root	NULL	MppVersion:<num>, data:ExchangeSender
+  └─ExchangeSender	6.00	mpp[tiflash]	NULL	ExchangeType: PassThrough
+    └─Projection	6.00	mpp[tiflash]	NULL	vector__functions_vector.t.embedding, vec_cosine_distance(vector__functions_vector.t.embedding, [5,5,5])->Column#3
+      └─TableFullScan	6.00	mpp[tiflash]	table:t	keep order:false
+
+
+-- FIXME: the behavior to handle VEC_COSINE_DISTANCE(embedding, NULL) is different
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
+embedding	d
+[1.1,2.2,3.3]	NULL
+[4.4,5.5,6.6]	NULL
+[7.7,8.8,9.9]	NULL
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
+Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 0, e.what() = DB::Exception,
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): vectors have different dimensions: 3 and 0
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 0, e.what() = DB::Exception,
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[1]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): vectors have different dimensions: 3 and 1
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[1]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 1, e.what() = DB::Exception,
+
+-- Test function: VEC_L1_DISTANCE()
+
+SELECT VEC_L1_DISTANCE('[0,0]', '[3,4]');
+VEC_L1_DISTANCE('[0,0]', '[3,4]')
+7
+
+SELECT VEC_L1_DISTANCE('[0,0]', '[0,1]');
+VEC_L1_DISTANCE('[0,0]', '[0,1]')
+1
+
+SELECT VEC_L1_DISTANCE('[1,2]', '[3]');
+Error 1105 (HY000): vectors have different dimensions: 2 and 1
+
+-- FIXME: should output NULL instead of 0
+SELECT VEC_L1_DISTANCE('[3e38]', '[-3e38]');
+VEC_L1_DISTANCE('[3e38]', '[-3e38]')
+0
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_L1_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+embedding
+[1.1,2.2,3.3]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t WHERE VEC_L1_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+id	estRows	task	access object	operator info
+TableReader	4.80	root	NULL	data:Selection
+└─Selection	4.80	cop[tikv]	NULL	eq(vec_l1_distance(vector__functions_vector.t.embedding, [1.1,2.2,3.3]), 0)
+  └─TableFullScan	6.00	cop[tikv]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_L1_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+embedding
+[1.1,2.2,3.3]
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t WHERE VEC_L1_DISTANCE(embedding, '[1.1,2.2,3.3]') = 0;
+id	estRows	task	access object	operator info
+TableReader	4.80	root	NULL	MppVersion:<num>, data:ExchangeSender
+└─ExchangeSender	4.80	mpp[tiflash]	NULL	ExchangeType: PassThrough
+  └─Selection	4.80	mpp[tiflash]	NULL	eq(vec_l1_distance(vector__functions_vector.t.embedding, [1.1,2.2,3.3]), 0)
+    └─TableFullScan	6.00	mpp[tiflash]	table:t	pushed down filter:empty, keep order:false
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+embedding	d
+[4.4,5.5,6.6]	2.6999998092651367
+[1.1,2.2,3.3]	8.399999618530273
+[7.7,8.8,9.9]	11.399999618530273
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+id	estRows	task	access object	operator info
+Sort	6.00	root	NULL	Column#3
+└─Projection	6.00	root	NULL	vector__functions_vector.t.embedding, vec_l1_distance(vector__functions_vector.t.embedding, [5,5,5])->Column#3
+  └─TableReader	6.00	root	NULL	data:TableFullScan
+    └─TableFullScan	6.00	cop[tikv]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+embedding	d
+[4.4,5.5,6.6]	2.6999998092651367
+[1.1,2.2,3.3]	8.399999618530273
+[7.7,8.8,9.9]	11.399999618530273
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
+id	estRows	task	access object	operator info
+Sort	6.00	root	NULL	Column#3
+└─TableReader	6.00	root	NULL	MppVersion:<num>, data:ExchangeSender
+  └─ExchangeSender	6.00	mpp[tiflash]	NULL	ExchangeType: PassThrough
+    └─Projection	6.00	mpp[tiflash]	NULL	vector__functions_vector.t.embedding, vec_l1_distance(vector__functions_vector.t.embedding, [5,5,5])->Column#3
+      └─TableFullScan	6.00	mpp[tiflash]	table:t	keep order:false
+
+
+-- FIXME: the behavior to handle VEC_L1_DISTANCE(embedding, NULL) is different
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L1_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
+embedding	d
+[1.1,2.2,3.3]	NULL
+[4.4,5.5,6.6]	NULL
+[7.7,8.8,9.9]	NULL
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L1_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
+Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 0, e.what() = DB::Exception,
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): vectors have different dimensions: 3 and 0
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 0, e.what() = DB::Exception,
+
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[1]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): vectors have different dimensions: 3 and 1
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[1]') AS d FROM t ORDER BY d;
+Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 1, e.what() = DB::Exception,

@@ -1,0 +1,174 @@
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 1;
+
+-- echo
+-- echo -- Create a table with VECTOR type column and enable TiFlash replica.
+DROP TABLE IF EXISTS t;
+CREATE TABLE t (embedding VECTOR);
+INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,6]'), ('[7,8,9]'), ('[]'), (NULL);
+
+-- echo
+-- echo -- Analyze the table.
+-- echo
+ANALYZE TABLE t;
+
+-- echo
+-- echo -- Add TiFlash replica.
+-- echo
+ALTER TABLE t SET TIFLASH REPLICA 1;
+SELECT SLEEP(60);
+SELECT AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t') ORDER BY TABLE_NAME;
+
+-- echo
+-- echo -- Test comparison functions/operators
+-- echo
+
+-- echo
+-- echo -- Test conversion operator: CAST()
+-- echo
+
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS BINARY);
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS CHAR);
+-- error ER_UNKNOWN_ERROR
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS JSON);
+-- error ER_UNKNOWN_ERROR
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS DECIMAL(2));
+-- error ER_UNKNOWN_ERROR
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS DOUBLE);
+-- error ER_UNKNOWN_ERROR
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS FLOAT);
+-- error ER_UNKNOWN_ERROR
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS REAL);
+-- error ER_UNKNOWN_ERROR
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS SIGNED);
+-- error ER_UNKNOWN_ERROR
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS UNSIGNED);
+-- error ER_UNKNOWN_ERROR
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS YEAR);
+-- error ER_UNKNOWN_ERROR
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS DATETIME);
+-- error ER_UNKNOWN_ERROR
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS DATE);
+-- error ER_UNKNOWN_ERROR
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS TIME);
+
+SELECT CAST('[1,2,3]' AS VECTOR);
+SELECT CAST('[1,2,3]' AS VECTOR<FLOAT>);
+-- error ER_PARSE_ERROR
+SELECT CAST('[1,2,3]' AS VECTOR<DOUBLE>);
+
+-- echo
+-- echo -- Test conversion function: CONVERT()
+-- echo
+
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), BINARY);
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), CHAR);
+-- error ER_UNKNOWN_ERROR
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), JSON);
+-- error ER_UNKNOWN_ERROR
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), DECIMAL);
+-- error ER_UNKNOWN_ERROR
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), DOUBLE);
+-- error ER_UNKNOWN_ERROR
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), FLOAT);
+-- error ER_UNKNOWN_ERROR
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), REAL);
+-- error ER_UNKNOWN_ERROR
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), SIGNED);
+-- error ER_UNKNOWN_ERROR
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), UNSIGNED);
+-- error ER_UNKNOWN_ERROR
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), YEAR);
+-- error ER_UNKNOWN_ERROR
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), DATETIME);
+-- error ER_UNKNOWN_ERROR
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), DATE);
+-- error ER_UNKNOWN_ERROR
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), TIME);
+
+SELECT CONVERT('[1,2,3]', VECTOR);
+SELECT CONVERT('[1,2,3]', VECTOR<FLOAT>);
+-- error ER_PARSE_ERROR
+SELECT CONVERT('[1,2,3]', VECTOR<DOUBLE>);
+
+-- echo
+-- echo -- Test control flow functions
+-- echo
+
+-- echo
+-- echo -- Test control flow function: IF()
+-- echo
+
+SELECT IF(VEC_FROM_TEXT('[1, 2, 3]'), TRUE, FALSE) AS result;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE IF(embedding, TRUE, FALSE);
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE IF(embedding, TRUE, FALSE);
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE IF(embedding, TRUE, FALSE);
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE IF(embedding, TRUE, FALSE);
+-- echo
+
+SELECT IF(VEC_FROM_TEXT('[1,2,3]') = VEC_FROM_TEXT('[1,2,3]'), TRUE, FALSE) AS result;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE IF(embedding = VEC_FROM_TEXT('[1,2,3]'), TRUE, FALSE);
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE IF(embedding = VEC_FROM_TEXT('[1,2,3]'), TRUE, FALSE);
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE IF(embedding = VEC_FROM_TEXT('[1,2,3]'), TRUE, FALSE);
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE IF(embedding = VEC_FROM_TEXT('[1,2,3]'), TRUE, FALSE);
+-- echo
+
+SELECT IF(TRUE, VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]')) AS result;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE IF(TRUE, embedding, VEC_FROM_TEXT('[4, 5, 6]'));
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE IF(TRUE, embedding, VEC_FROM_TEXT('[4, 5, 6]'));
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE IF(TRUE, embedding, VEC_FROM_TEXT('[4, 5, 6]'));
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE IF(TRUE, embedding, VEC_FROM_TEXT('[4, 5, 6]'));
+
+
+-- echo
+-- echo -- Test control flow function: IFNULL()
+-- echo
+SELECT IFNULL(VEC_FROM_TEXT('[1, 2, 3]'), 1) AS result;
+-- echo
+SELECT IFNULL(NULL, VEC_FROM_TEXT('[1, 2, 3]')) AS result;
+
+-- echo
+-- echo -- Test control flow function: NULLIF()
+-- echo
+SELECT NULLIF(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[1, 2, 3]')) AS result;
+-- echo
+SELECT NULLIF(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]')) AS result;
+
+-- echo
+-- echo -- Test flow function operator: CASE WHEN
+-- echo
+
+SELECT CASE WHEN TRUE THEN VEC_FROM_TEXT('[1, 2, 3]') ELSE VEC_FROM_TEXT('[4, 5, 6]') END AS result;
+
+-- echo
+-- echo -- Test comparison functions
+-- echo
+
+-- echo
+-- echo -- Test comparison function: GREATEST()
+-- echo
+SELECT GREATEST(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]'), VEC_FROM_TEXT('[7, 8, 9]')) AS result;
+
+-- echo
+-- echo -- Test comparison function: LEAST()
+-- echo
+SELECT LEAST(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]'), VEC_FROM_TEXT('[7, 8, 9]')) AS result;
+
+-- echo
+-- echo -- Test comparison function: COALESCE()
+-- echo
+SELECT COALESCE(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]')) AS result;
+SELECT COALESCE(NULL, VEC_FROM_TEXT('[1, 2, 3]')) AS result;
+SELECT COALESCE(VEC_FROM_TEXT('[1, 2, 3]'), 1) AS result;
+SELECT COALESCE(VEC_FROM_TEXT('[1, 2, 3]'), '1') AS result;

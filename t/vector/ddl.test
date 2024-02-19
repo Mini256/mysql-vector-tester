@@ -1,0 +1,79 @@
+-- echo
+-- echo -- Test Global Variable: TIDB_ENABLE_VECTOR_TYPE
+-- echo
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 0;
+DROP TABLE IF EXISTS t;
+-- error ER_UNKNOWN_ERROR
+CREATE TABLE t (embedding VECTOR);
+
+-- echo
+-- echo -- Test statement: CREATE TABLE
+-- echo
+
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 1;
+CREATE TABLE t (embedding VECTOR);
+
+-- echo
+-- echo -- Test statement: CREATE INDEX
+-- echo
+
+-- error ER_WRONG_KEY_COLUMN
+CREATE INDEX idx ON t(embedding);
+
+-- echo
+-- echo -- Test statement: VECTOR column with NOT NULL flag
+-- echo
+
+CREATE TABLE t2 (id INT, embedding VECTOR NOT NULL);
+INSERT INTO t2 VALUES (1, '[1,2,3]'), (2, '[4,5,6]'), (3, '[7,8,9]');
+INSERT INTO t2 VALUES (4, '[]');
+-- error ER_BAD_NULL_ERROR
+INSERT INTO t2 VALUES (4, NULL);
+DROP TABLE t2;
+
+-- echo
+-- echo -- Test statement: VECTOR column with DEFAULT flag
+-- echo
+
+CREATE TABLE t2 (id INT, embedding VECTOR NOT NULL DEFAULT '[0,0,0]');
+INSERT INTO t2(id) VALUES (1);
+SELECT * FROM t2 WHERE id = 1;
+DROP TABLE t2;
+
+-- echo
+-- echo -- Test statement: SHOW CREATE TABLE
+-- echo
+
+SHOW CREATE TABLE t;
+
+-- echo
+-- echo -- Test statement: DESC
+-- echo
+
+DESC t;
+
+-- echo
+-- echo -- Test statement: INFORMATION_SCHEMA.COLUMNS
+-- echo
+SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 't';
+
+-- echo
+-- echo -- Test statement: TRUNCATE TABLE
+-- echo
+
+CREATE TABLE t2 (embedding VECTOR);
+INSERT INTO t2 VALUES ('[1,2,3]'), ('[4,5,6]'), ('[7,8,9]');
+SELECT embedding FROM t2;
+-- echo -- # Note: TRUNCATE TABLE Command will delete the TiFlash replica.
+TRUNCATE TABLE t2;
+SELECT embedding FROM t2;
+DROP TABLE t2;
+
+-- echo
+-- echo -- Test statement: CREATE TEMPORARY TABLE
+-- echo
+
+CREATE TEMPORARY TABLE t2 (embedding VECTOR);
+INSERT INTO t2 VALUES ('[1,2,3]'), ('[4,5,6]'), ('[7,8,9]');
+SELECT * FROM t2;
+DROP TABLE t2;

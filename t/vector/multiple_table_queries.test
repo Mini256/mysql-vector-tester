@@ -1,0 +1,91 @@
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 1;
+
+-- echo
+-- echo -- Create table t1
+DROP TABLE IF EXISTS t1;
+CREATE TABLE t1 (id INT, embedding VECTOR);
+ALTER TABLE t1 SET TIFLASH REPLICA 1;
+INSERT INTO t1  VALUES (1, '[1,2,3]'), (2, '[4,5,6]');
+
+-- echo
+-- echo -- Create table t2
+DROP TABLE IF EXISTS t2;
+CREATE TABLE t2 (id INT, embedding VECTOR);
+ALTER TABLE t2 SET TIFLASH REPLICA 1;
+INSERT INTO t2 VALUES (3, '[4,5,6]'), (4, '[7,8,9]');
+
+-- echo
+-- echo -- Analyze table
+ANALYZE TABLE t1, t2;
+
+-- echo
+-- echo -- Add TiFlash Replica
+SELECT SLEEP(60);
+SELECT AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t1', 't2') ORDER BY TABLE_NAME;
+
+-- echo
+-- echo -- Test feature: SubQuery
+-- echo
+
+-- echo -- Test SubQuery type: using sub-query as scalar
+SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ t1.embedding, (SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ MAX(t2.embedding) FROM t2) AS max_in_t2 FROM t1;
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ t1.embedding, (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ MAX(t2.embedding) FROM t2) AS max_in_t2 FROM t1;
+-- echo
+
+-- echo -- Test SubQuery type: using sub-query as derived table
+SELECT embedding FROM (SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ embedding FROM t1 ORDER BY embedding LIMIT 1) derived_table;
+SELECT embedding FROM (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ embedding FROM t1 ORDER BY embedding LIMIT 1) derived_table;
+-- echo
+
+-- echo -- Test SubQuery type: using sub-query in the existential test
+SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ t1.embedding FROM t1 WHERE EXISTS(SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ 1 FROM t2 WHERE t1.embedding = t2.embedding);
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ t1.embedding FROM t1 WHERE EXISTS(SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ 1 FROM t2 WHERE t1.embedding = t2.embedding);
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ t1.embedding FROM t1 WHERE t1.embedding NOT IN (SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ t2.embedding FROM t2);
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ t1.embedding FROM t1 WHERE t1.embedding NOT IN (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ t2.embedding FROM t2);
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ t1.embedding FROM t1 WHERE t1.embedding IN (SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ t2.embedding FROM t2);
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ t1.embedding FROM t1 WHERE t1.embedding IN (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ t2.embedding FROM t2);
+-- echo
+
+-- echo -- Test SubQuery type: using sub-query in the quantified comparison
+SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ t1.embedding FROM t1 WHERE t1.embedding = ANY(SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ t2.embedding FROM t2);
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ t1.embedding FROM t1 WHERE t1.embedding = ANY(SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ t2.embedding FROM t2);
+-- echo
+
+-- echo -- Test SubQuery type: using sub-query as operands of operators
+SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ t2.embedding FROM t2 WHERE t2.embedding > (SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ MAX(t1.embedding) FROM t1);
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ t2.embedding FROM t2 WHERE t2.embedding > (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ MAX(t1.embedding) FROM t1);
+-- echo
+
+-- echo
+-- echo -- Test clause: UNION / EXCEPT / INTERSECT
+-- echo
+-- sorted_result
+SELECT t1.embedding FROM t1 UNION SELECT t2.embedding FROM t2;
+-- sorted_result
+SELECT t1.embedding FROM t1 UNION ALL SELECT t2.embedding FROM t2;
+SELECT t1.embedding FROM t1 EXCEPT SELECT t2.embedding FROM t2;
+SELECT t1.embedding FROM t1 INTERSECT SELECT t2.embedding FROM t2;
+
+-- echo
+-- echo -- Test clause: JOIN
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIKV[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIFLASH[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+-- replace_regex /:[ ]?[.0-9]+.*?,/:<num>,/ /:[ ]?[.0-9]+.*?}/:<num>}/ /[0-9]+ Bytes/<num> Bytes/
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1], TIFLASH[t2]) */ t1.embedding, t2.embedding FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+
+-- echo
+-- echo -- Test feature: CTE
+-- echo
+WITH t1 AS (SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ * FROM t1), t2 AS (SELECT /*+ READ_FROM_STORAGE(TIKV[t2]) */ * FROM t2) SELECT * FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+WITH t1 AS (SELECT /*+ READ_FROM_STORAGE(TIKV[t1]) */ * FROM t1), t2 AS (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ * FROM t2) SELECT * FROM t1 JOIN t2 ON t1.embedding = t2.embedding;
+WITH t1 AS (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t1]) */ * FROM t1), t2 AS (SELECT /*+ READ_FROM_STORAGE(TIFLASH[t2]) */ * FROM t2) SELECT * FROM t1 JOIN t2 ON t1.embedding = t2.embedding;

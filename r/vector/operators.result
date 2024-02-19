@@ -1,0 +1,230 @@
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 1;
+
+-- Create a table with VECTOR type column and enable TiFlash replica.
+DROP TABLE IF EXISTS t;
+CREATE TABLE t (embedding VECTOR);
+
+-- Analyze the table.
+
+ANALYZE TABLE t;
+
+-- Add TiFlash replica.
+
+ALTER TABLE t SET TIFLASH REPLICA 1;
+SELECT SLEEP(60);
+SLEEP(60)
+0
+SELECT AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t') ORDER BY TABLE_NAME;
+AVAILABLE	PROGRESS
+1	1
+
+-- Test operator: IS
+DELETE FROM t WHERE 1 = 1;
+INSERT INTO t VALUES ('[1,2,3]'), ('[]'), (NULL);
+
+SELECT VEC_FROM_TEXT('[]') IS TRUE;
+VEC_FROM_TEXT('[]') IS TRUE
+0
+SELECT VEC_FROM_TEXT('[]') IS FALSE;
+VEC_FROM_TEXT('[]') IS FALSE
+1
+SELECT VEC_FROM_TEXT('[]') IS UNKNOWN;
+VEC_FROM_TEXT('[]') IS UNKNOWN
+0
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS TRUE;
+embedding
+[1,2,3]
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS TRUE;
+id	estRows	task	access object	operator info
+Selection_6	8000.00	root		istrue(vector__operators.t.embedding)
+└─TableReader_8	10000.00	root		data:TableFullScan_7
+  └─TableFullScan_7	10000.00	cop[tikv]	table:t	keep order:false, stats:pseudo
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS TRUE;
+embedding
+[1,2,3]
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS TRUE;
+id	estRows	task	access object	operator info
+Selection_9	8000.00	root		istrue(vector__operators.t.embedding)
+└─TableReader_12	10000.00	root		MppVersion: 1, data:ExchangeSender_11
+  └─ExchangeSender_11	10000.00	mpp[tiflash]		ExchangeType: PassThrough
+    └─TableFullScan_10	10000.00	mpp[tiflash]	table:t	keep order:false, stats:pseudo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS FALSE;
+embedding
+[]
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS FALSE;
+id	estRows	task	access object	operator info
+Selection_6	8000.00	root		isfalse(vector__operators.t.embedding)
+└─TableReader_8	10000.00	root		data:TableFullScan_7
+  └─TableFullScan_7	10000.00	cop[tikv]	table:t	keep order:false, stats:pseudo
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS FALSE;
+embedding
+[]
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS FALSE;
+id	estRows	task	access object	operator info
+Selection_9	8000.00	root		isfalse(vector__operators.t.embedding)
+└─TableReader_12	10000.00	root		MppVersion: 1, data:ExchangeSender_11
+  └─ExchangeSender_11	10000.00	mpp[tiflash]		ExchangeType: PassThrough
+    └─TableFullScan_10	10000.00	mpp[tiflash]	table:t	keep order:false, stats:pseudo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS UNKNOWN;
+embedding
+NULL
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS UNKNOWN;
+id	estRows	task	access object	operator info
+TableReader_8	10.00	root		data:Selection_7
+└─Selection_7	10.00	cop[tikv]		isnull(vector__operators.t.embedding)
+  └─TableFullScan_6	10000.00	cop[tikv]	table:t	keep order:false, stats:pseudo
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS UNKNOWN;
+embedding
+NULL
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS UNKNOWN;
+id	estRows	task	access object	operator info
+TableReader_12	10.00	root		MppVersion: 1, data:ExchangeSender_11
+└─ExchangeSender_11	10.00	mpp[tiflash]		ExchangeType: PassThrough
+  └─Selection_10	10.00	mpp[tiflash]		isnull(vector__operators.t.embedding)
+    └─TableFullScan_9	10000.00	mpp[tiflash]	table:t	pushed down filter:empty, keep order:false, stats:pseudo
+
+SELECT VEC_FROM_TEXT('[]') IS NOT NULL;
+VEC_FROM_TEXT('[]') IS NOT NULL
+1
+SELECT VEC_FROM_TEXT('[]') IS NULL;
+VEC_FROM_TEXT('[]') IS NULL
+0
+
+-- Test arithmetic operators: + / - / * / /
+
+DELETE FROM t WHERE 1 = 1;
+INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,6]'), ('[7,8,9]');
+
+SELECT VEC_FROM_TEXT('[1,2]') + '[2,3]';
+VEC_FROM_TEXT('[1,2]') + '[2,3]'
+[3,5]
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ t.embedding + '[1,2,3]' FROM t;
+t.embedding + '[1,2,3]'
+[2,4,6]
+[5,7,9]
+[8,10,12]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ t.embedding + '[1,2,3]' FROM t;
+t.embedding + '[1,2,3]'
+[2,4,6]
+[5,7,9]
+[8,10,12]
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ t.embedding + t.embedding FROM t;
+t.embedding + t.embedding
+[2,4,6]
+[8,10,12]
+[14,16,18]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ t.embedding + t.embedding FROM t;
+t.embedding + t.embedding
+[2,4,6]
+[8,10,12]
+[14,16,18]
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ t.embedding + 1 FROM t;
+Error 1105 (HY000): cannot cast from bigint to vector<float>
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ t.embedding + 1 FROM t;
+Error 1105 (HY000): cannot cast from bigint to vector<float>
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ t.embedding + '[]' FROM t;
+Error 1105 (HY000): vectors have different dimensions: 3 and 0
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ t.embedding + '[]' FROM t;
+Error 1105 (HY000): vectors have different dimensions: 3 and 0
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ t.embedding + '[1]' FROM t;
+Error 1105 (HY000): vectors have different dimensions: 3 and 1
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ t.embedding + '[1]' FROM t;
+Error 1105 (HY000): vectors have different dimensions: 3 and 1
+
+SELECT VEC_FROM_TEXT('[2,3,4]') - '[1,2,3]';
+VEC_FROM_TEXT('[2,3,4]') - '[1,2,3]'
+[1,1,1]
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ t.embedding - '[1,2,3]' FROM t;
+t.embedding - '[1,2,3]'
+[0,0,0]
+[3,3,3]
+[6,6,6]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ t.embedding - '[1,2,3]' FROM t;
+t.embedding - '[1,2,3]'
+[0,0,0]
+[3,3,3]
+[6,6,6]
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ t.embedding - t.embedding FROM t;
+t.embedding - t.embedding
+[0,0,0]
+[0,0,0]
+[0,0,0]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ t.embedding - t.embedding FROM t;
+t.embedding - t.embedding
+[0,0,0]
+[0,0,0]
+[0,0,0]
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding + '[1,1,1]' = '[2,3,4]';
+embedding
+[1,2,3]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding + '[1,1,1]' = '[2,3,4]';
+embedding
+[1,2,3]
+
+-- Test comparison operators
+
+SELECT VEC_FROM_TEXT('[]') = VEC_FROM_TEXT('[]');
+VEC_FROM_TEXT('[]') = VEC_FROM_TEXT('[]')
+1
+SELECT VEC_FROM_TEXT('[]') != VEC_FROM_TEXT('[]');
+VEC_FROM_TEXT('[]') != VEC_FROM_TEXT('[]')
+0
+SELECT VEC_FROM_TEXT('[]') > VEC_FROM_TEXT('[]');
+VEC_FROM_TEXT('[]') > VEC_FROM_TEXT('[]')
+0
+SELECT VEC_FROM_TEXT('[]') >= VEC_FROM_TEXT('[]');
+VEC_FROM_TEXT('[]') >= VEC_FROM_TEXT('[]')
+1
+SELECT VEC_FROM_TEXT('[]') < VEC_FROM_TEXT('[]');
+VEC_FROM_TEXT('[]') < VEC_FROM_TEXT('[]')
+0
+SELECT VEC_FROM_TEXT('[]') <= VEC_FROM_TEXT('[]');
+VEC_FROM_TEXT('[]') <= VEC_FROM_TEXT('[]')
+1
+
+SELECT VEC_FROM_TEXT('[1, 2, 3]') = VEC_FROM_TEXT('[1, 2, 3]');
+VEC_FROM_TEXT('[1, 2, 3]') = VEC_FROM_TEXT('[1, 2, 3]')
+1
+SELECT VEC_FROM_TEXT('[1, 2, 3]') != VEC_FROM_TEXT('[1, 2, 3]');
+VEC_FROM_TEXT('[1, 2, 3]') != VEC_FROM_TEXT('[1, 2, 3]')
+0
+
+SELECT VEC_FROM_TEXT('[1, 2, 3]') > VEC_FROM_TEXT('[1]');
+VEC_FROM_TEXT('[1, 2, 3]') > VEC_FROM_TEXT('[1]')
+1
+SELECT VEC_FROM_TEXT('[1, 2, 3]') >= VEC_FROM_TEXT('[1]');
+VEC_FROM_TEXT('[1, 2, 3]') >= VEC_FROM_TEXT('[1]')
+1
+SELECT VEC_FROM_TEXT('[1, 2, 3]') < VEC_FROM_TEXT('[1]');
+VEC_FROM_TEXT('[1, 2, 3]') < VEC_FROM_TEXT('[1]')
+0
+SELECT VEC_FROM_TEXT('[1, 2, 3]') <= VEC_FROM_TEXT('[1]');
+VEC_FROM_TEXT('[1, 2, 3]') <= VEC_FROM_TEXT('[1]')
+0
+
+SELECT VEC_FROM_TEXT('[1, 2, 3]') > '[1]';
+VEC_FROM_TEXT('[1, 2, 3]') > '[1]'
+1
+SELECT VEC_FROM_TEXT('[1, 2, 3]') >= '[1]';
+VEC_FROM_TEXT('[1, 2, 3]') >= '[1]'
+1
+SELECT VEC_FROM_TEXT('[1, 2, 3]') < '[1]';
+VEC_FROM_TEXT('[1, 2, 3]') < '[1]'
+0
+SELECT VEC_FROM_TEXT('[1, 2, 3]') <= '[1]';
+VEC_FROM_TEXT('[1, 2, 3]') <= '[1]'
+0

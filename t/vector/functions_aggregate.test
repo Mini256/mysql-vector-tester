@@ -1,0 +1,83 @@
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 1;
+
+-- echo
+-- echo -- Create a table with VECTOR type column and enable TiFlash replica.
+DROP TABLE IF EXISTS t;
+CREATE TABLE t (embedding VECTOR);
+INSERT INTO t VALUES
+      ('[8.7, 5.7, 7.7, 9.8, 1.5]'),
+      ('[3.6, 9.7, 2.4, 6.6, 4.9]'),
+      ('[4.7, 4.9, 2.6, 5.2, 7.4]'),
+      ('[4.7, 4.9, 2.6, 5.2, 7.4]'),
+      ('[7.7, 6.7, 8.3, 7.8, 5.7]'),
+      ('[1.4, 4.5, 8.5, 7.7, 6.2]');
+
+-- echo
+-- echo -- Analyze the table.
+-- echo
+ANALYZE TABLE t;
+
+-- echo
+-- echo -- Add TiFlash replica.
+-- echo
+ALTER TABLE t SET TIFLASH REPLICA 1;
+SELECT SLEEP(60);
+SELECT AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t') ORDER BY TABLE_NAME;
+
+-- echo
+-- echo -- Test aggregate function: COUNT()
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ COUNT(embedding) FROM t;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ COUNT(embedding) FROM t;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ COUNT(*), embedding FROM t GROUP BY embedding ORDER BY embedding;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ COUNT(*), embedding FROM t GROUP BY embedding ORDER BY embedding;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ COUNT(DISTINCT embedding) FROM t;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ COUNT(DISTINCT embedding) FROM t;
+
+-- echo
+-- echo -- Test aggregate function: MIN()
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ MIN(embedding) FROM t;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ MIN(embedding) FROM t;
+
+-- echo
+-- echo -- Test aggregate function: MAX()
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ MAX(embedding) FROM t;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ MAX(embedding) FROM t;
+
+-- echo
+-- echo -- Test aggregate function: SUM()
+-- echo
+
+-- echo -- FIXME: cast to double can not push down
+
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ SUM(embedding) FROM t;
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ SUM(embedding) FROM t;
+
+-- echo
+-- echo -- Test aggregate function: AVG()
+-- echo
+
+-- echo -- FIXME: cast to double can not push down
+
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ AVG(embedding) FROM t;
+-- echo
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ AVG(embedding) FROM t;

@@ -1,0 +1,154 @@
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 1;
+-- echo
+-- echo -- Create a table with VECTOR type column and enable TiFlash replica.
+DROP TABLE IF EXISTS t;
+CREATE TABLE t (embedding VECTOR);
+ALTER TABLE t SET TIFLASH REPLICA 1;
+SELECT SLEEP(60);
+
+-- echo
+-- echo -- Check if the TiFlash replica is available.
+SELECT AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t') ORDER BY TABLE_NAME;
+
+-- echo
+-- echo -- Test statement: INSERT
+-- echo
+
+INSERT INTO t VALUES (VEC_FROM_TEXT('[1,2.1,3.3]'));
+-- error ER_UNKNOWN_ERROR
+INSERT INTO t VALUES ('[1,2.1,null]');
+-- error ER_UNKNOWN_ERROR
+INSERT INTO t VALUES ('[1,2.1,inf]');
+-- error ER_UNKNOWN_ERROR
+INSERT INTO t VALUES ('[1,2.1,nan]');
+INSERT INTO t VALUES ('[]');
+INSERT INTO t VALUES (NULL);
+-- echo
+INSERT INTO t VALUES ('[4,5,6]'), ('[7,8,9]');
+-- echo
+-- echo -- Test statement:  INSERT ... SELECT ...
+CREATE TABLE tmp (embedding VECTOR);
+INSERT INTO tmp SELECT embedding FROM t;
+SELECT embedding FROM tmp ORDER BY embedding;
+DROP TABLE tmp;
+
+-- echo
+-- echo -- Test statement: UPDATE
+-- echo
+
+UPDATE t SET embedding = VEC_FROM_TEXT('[1,2,3]') WHERE embedding = VEC_FROM_TEXT('[1,2.1,3.3]');
+
+-- echo
+BEGIN;
+SELECT * FROM t WHERE embedding = VEC_FROM_TEXT('[]') FOR UPDATE;
+UPDATE t SET embedding = NULL WHERE embedding = VEC_FROM_TEXT('[]');
+COMMIT;
+
+-- echo
+-- echo -- Test statement: DELETE
+-- echo
+
+DELETE FROM t WHERE embedding IS NULL;
+
+-- echo
+-- echo -- Analyze table
+-- echo
+
+ANALYZE TABLE t;
+
+-- echo
+-- echo -- Test statement: SELECT
+-- echo
+
+-- sorted_result
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t;
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t;
+-- echo
+-- sorted_result
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t;
+EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t;
+
+-- echo
+-- echo -- Prepare test data
+-- echo
+
+DELETE FROM t WHERE 1 = 1;
+INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,6]'), ('[7,8,9]'), (NULL), ('[]');
+
+-- echo
+-- echo -- Test clause: WHERE
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IS NULL;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IS NULL;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding = '[]';
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding = '[]';
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding = VEC_FROM_TEXT('[1,2,3]');
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding = VEC_FROM_TEXT('[1,2,3]');
+
+-- echo
+-- echo -- Prepare test data
+DELETE FROM t WHERE 1 = 1;
+INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,6]'), ('[7,8,9]');
+
+-- echo
+-- echo -- Test operator: BETWEEN ... AND ...
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding BETWEEN '[1,2,3]' AND '[4,5,6]';
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding BETWEEN '[1,2,3]' AND '[4,5,6]';
+
+-- echo
+-- echo -- Test operator: IN / NOT IN
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding IN ('[1,2,3]', '[4,5,6]');
+
+-- echo
+-- echo -- Test operator: LIKE
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding LIKE '%2%';
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding LIKE '%2%';
+
+-- echo
+-- echo -- Test operator: ILIKE
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE embedding ILIKE '%2%';
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE embedding ILIKE '%2%';
+
+-- echo
+-- echo -- Test clause: HAVING
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding FROM t GROUP BY embedding HAVING embedding > VEC_FROM_TEXT('[4,5,6]') ORDER BY embedding;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding FROM t GROUP BY embedding HAVING embedding > VEC_FROM_TEXT('[4,5,6]') ORDER BY embedding;
+
+-- echo
+-- echo -- Test clause: ORDER BY
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t ORDER BY embedding DESC;
+-- echo
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t ORDER BY embedding DESC;
+
+-- echo
+-- echo -- Test feature: Prepared Statement
+-- echo
+
+PREPARE stmt FROM 'SELECT * FROM t WHERE embedding = ?';
+SET @a = VEC_FROM_TEXT('[1,2,3]');
+EXECUTE stmt USING @a;
+DEALLOCATE PREPARE stmt;

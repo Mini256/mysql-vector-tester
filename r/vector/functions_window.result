@@ -1,0 +1,144 @@
+
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 1;
+
+-- Prepare test data
+
+-- Create t1 table
+DROP TABLE IF EXISTS t1;
+CREATE TABLE t1 (embedding VECTOR);
+ALTER TABLE t1 SET TIFLASH REPLICA 1;
+INSERT INTO t1 VALUES ('[1,2,3]'), ('[4,5,601]'), ('[4,5,61]');
+-- Create t2 table
+DROP TABLE IF EXISTS t2;
+CREATE TABLE t2 (embedding VECTOR);
+ALTER TABLE t2 SET TIFLASH REPLICA 1;
+INSERT INTO t2 VALUES ('[1,2,3]'), ('[4,5,6]'), ('[4,5,6]'), ('[7,8,9]');
+
+-- Analyze the table.
+
+ANALYZE TABLE t1, t2;
+
+-- Add TiFlash replica.
+
+SELECT SLEEP(60);
+SLEEP(60)
+0
+SELECT AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t1', 't2') ORDER BY TABLE_NAME;
+AVAILABLE	PROGRESS
+1	1
+1	1
+
+-- Test window functions: FIRST_VALUE() / LAST_VALUE() / NTH_VALUE()
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t1 WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
+embedding	first	second	last
+[1,2,3]	[1,2,3]	NULL	[1,2,3]
+[4,5,61]	[1,2,3]	[4,5,61]	[4,5,61]
+[4,5,601]	[1,2,3]	[4,5,61]	[4,5,601]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t1 WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
+embedding	first	second	last
+[1,2,3]	[1,2,3]	NULL	[1,2,3]
+[4,5,61]	[1,2,3]	[4,5,61]	[4,5,61]
+[4,5,601]	[1,2,3]	[4,5,61]	[4,5,601]
+
+-- Test window functions: ROW_NUMBER() / RANK() / DENSE_RANK()
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, ROW_NUMBER() OVER w AS 'row_num', RANK() OVER w AS 'rank', DENSE_RANK() OVER w AS 'dense_rank' FROM t1 WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
+embedding	row_num	rank	dense_rank
+[1,2,3]	1	1	1
+[4,5,61]	2	2	2
+[4,5,601]	3	3	3
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, ROW_NUMBER() OVER w AS 'row_num', RANK() OVER w AS 'rank', DENSE_RANK() OVER w AS 'dense_rank' FROM t1 WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
+embedding	row_num	rank	dense_rank
+[1,2,3]	1	1	1
+[4,5,61]	2	2	2
+[4,5,601]	3	3	3
+
+-- Test window functions: LAG() / LEAD()
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, LAG(embedding) OVER w AS 'lag', LEAD(embedding) OVER w AS 'lead' FROM t2 WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
+embedding	lag	lead
+[1,2,3]	NULL	[4,5,6]
+[4,5,6]	[1,2,3]	[4,5,6]
+[4,5,6]	[4,5,6]	[7,8,9]
+[7,8,9]	[4,5,6]	NULL
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, LAG(embedding) OVER w AS 'lag', LEAD(embedding) OVER w AS 'lead' FROM t2 WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
+embedding	lag	lead
+[1,2,3]	NULL	[4,5,6]
+[4,5,6]	[1,2,3]	[4,5,6]
+[4,5,6]	[4,5,6]	[7,8,9]
+[7,8,9]	[4,5,6]	NULL
+
+-- Test window functions: COUNT(*)
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, COUNT(*) OVER (PARTITION BY embedding) AS cnt FROM t2 ORDER BY embedding;
+embedding	cnt
+[1,2,3]	1
+[4,5,6]	2
+[4,5,6]	2
+[7,8,9]	1
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, COUNT(*) OVER (PARTITION BY embedding) AS cnt FROM t2 ORDER BY embedding;
+embedding	cnt
+[1,2,3]	1
+[4,5,6]	2
+[4,5,6]	2
+[7,8,9]	1
+
+-- Test window functions: MAX()
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, MAX(embedding) OVER (ORDER BY embedding) AS max FROM t2 ORDER BY embedding;
+embedding	max
+[1,2,3]	[1,2,3]
+[4,5,6]	[4,5,6]
+[4,5,6]	[4,5,6]
+[7,8,9]	[7,8,9]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, MAX(embedding) OVER (ORDER BY embedding) AS max FROM t2 ORDER BY embedding;
+embedding	max
+[1,2,3]	[1,2,3]
+[4,5,6]	[4,5,6]
+[4,5,6]	[4,5,6]
+[7,8,9]	[7,8,9]
+
+-- Test window functions: MIN()
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, MIN(embedding) OVER (ORDER BY embedding) AS max FROM t2 ORDER BY embedding;
+embedding	max
+[1,2,3]	[1,2,3]
+[4,5,6]	[1,2,3]
+[4,5,6]	[1,2,3]
+[7,8,9]	[1,2,3]
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, MIN(embedding) OVER (ORDER BY embedding) AS max FROM t2 ORDER BY embedding;
+embedding	max
+[1,2,3]	[1,2,3]
+[4,5,6]	[1,2,3]
+[4,5,6]	[1,2,3]
+[7,8,9]	[1,2,3]
+
+-- Test window functions: AVG()
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, AVG(embedding) OVER (ORDER BY embedding) AS avg FROM t2 ORDER BY embedding;
+Error 1105 (HY000): cannot cast from vector<float> to double
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, AVG(embedding) OVER (ORDER BY embedding) AS avg FROM t2 ORDER BY embedding;
+Error 1105 (HY000): cannot cast from vector<float> to double
+
+-- Test window functions: SUM()
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, SUM(embedding) OVER (ORDER BY embedding) AS avg FROM t2 ORDER BY embedding;
+Error 1105 (HY000): cannot cast from vector<float> to double
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, SUM(embedding) OVER (ORDER BY embedding) AS avg FROM t2 ORDER BY embedding;
+Error 1105 (HY000): cannot cast from vector<float> to double
+
+-- Test window function: PARTITION BY / ORDER BY
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, ROW_NUMBER() OVER (PARTITION BY embedding ORDER BY embedding) AS 'row_num' FROM t2 ORDER BY embedding;
+embedding	row_num
+[1,2,3]	1
+[4,5,6]	1
+[4,5,6]	2
+[7,8,9]	1
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, ROW_NUMBER() OVER (PARTITION BY embedding ORDER BY embedding) AS 'row_num' FROM t2 ORDER BY embedding;
+embedding	row_num
+[1,2,3]	1
+[4,5,6]	1
+[4,5,6]	2
+[7,8,9]	1

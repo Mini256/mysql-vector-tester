@@ -1,0 +1,81 @@
+
+-- Test Global Variable: TIDB_ENABLE_VECTOR_TYPE
+
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 0;
+DROP TABLE IF EXISTS t;
+CREATE TABLE t (embedding VECTOR);
+Error 1105 (HY000): vector type is not supported
+
+-- Test statement: CREATE TABLE
+
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 1;
+CREATE TABLE t (embedding VECTOR);
+
+-- Test statement: CREATE INDEX
+
+CREATE INDEX idx ON t(embedding);
+Error 1167 (42000): The used storage engine can't index column 'embedding'
+
+-- Test statement: VECTOR column with NOT NULL flag
+
+CREATE TABLE t2 (id INT, embedding VECTOR NOT NULL);
+INSERT INTO t2 VALUES (1, '[1,2,3]'), (2, '[4,5,6]'), (3, '[7,8,9]');
+INSERT INTO t2 VALUES (4, '[]');
+INSERT INTO t2 VALUES (4, NULL);
+Error 1048 (23000): Column 'embedding' cannot be null
+DROP TABLE t2;
+
+-- Test statement: VECTOR column with DEFAULT flag
+
+CREATE TABLE t2 (id INT, embedding VECTOR NOT NULL DEFAULT '[0,0,0]');
+INSERT INTO t2(id) VALUES (1);
+SELECT * FROM t2 WHERE id = 1;
+id	embedding
+1	[0,0,0]
+DROP TABLE t2;
+
+-- Test statement: SHOW CREATE TABLE
+
+SHOW CREATE TABLE t;
+Table	Create Table
+t	CREATE TABLE `t` (
+  `embedding` vector<float> DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin
+
+-- Test statement: DESC
+
+DESC t;
+Field	Type	Null	Key	Default	Extra
+embedding	vector<float>	YES		NULL	
+
+-- Test statement: INFORMATION_SCHEMA.COLUMNS
+
+SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 't';
+TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	COLUMN_NAME	ORDINAL_POSITION	COLUMN_DEFAULT	IS_NULLABLE	DATA_TYPE	CHARACTER_MAXIMUM_LENGTH	CHARACTER_OCTET_LENGTH	NUMERIC_PRECISION	NUMERIC_SCALE	DATETIME_PRECISION	CHARACTER_SET_NAME	COLLATION_NAME	COLUMN_TYPE	COLUMN_KEY	EXTRA	PRIVILEGES	COLUMN_COMMENT	GENERATION_EXPRESSION
+def	vector__ddl	t	embedding	1	NULL	YES	vector<float>	NULL	NULL	NULL	NULL	NULL	NULL	NULL	vector<float>			select,insert,update,references		
+
+-- Test statement: TRUNCATE TABLE
+
+CREATE TABLE t2 (embedding VECTOR);
+INSERT INTO t2 VALUES ('[1,2,3]'), ('[4,5,6]'), ('[7,8,9]');
+SELECT embedding FROM t2;
+embedding
+[1,2,3]
+[4,5,6]
+[7,8,9]
+-- # Note: TRUNCATE TABLE Command will delete the TiFlash replica.
+TRUNCATE TABLE t2;
+SELECT embedding FROM t2;
+embedding
+DROP TABLE t2;
+
+-- Test statement: CREATE TEMPORARY TABLE
+
+CREATE TEMPORARY TABLE t2 (embedding VECTOR);
+INSERT INTO t2 VALUES ('[1,2,3]'), ('[4,5,6]'), ('[7,8,9]');
+SELECT * FROM t2;
+embedding
+[1,2,3]
+[4,5,6]
+[7,8,9]
+DROP TABLE t2;

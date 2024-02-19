@@ -1,0 +1,99 @@
+-- echo
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 1;
+
+-- echo
+-- echo -- Prepare test data
+-- echo
+
+-- echo -- Create t1 table
+DROP TABLE IF EXISTS t1;
+CREATE TABLE t1 (embedding VECTOR);
+ALTER TABLE t1 SET TIFLASH REPLICA 1;
+INSERT INTO t1 VALUES ('[1,2,3]'), ('[4,5,601]'), ('[4,5,61]');
+
+-- echo -- Create t2 table
+DROP TABLE IF EXISTS t2;
+CREATE TABLE t2 (embedding VECTOR);
+ALTER TABLE t2 SET TIFLASH REPLICA 1;
+INSERT INTO t2 VALUES ('[1,2,3]'), ('[4,5,6]'), ('[4,5,6]'), ('[7,8,9]');
+
+
+-- echo
+-- echo -- Analyze the table.
+-- echo
+
+ANALYZE TABLE t1, t2;
+
+-- echo
+-- echo -- Add TiFlash replica.
+-- echo
+
+SELECT SLEEP(60);
+SELECT AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t1', 't2') ORDER BY TABLE_NAME;
+
+-- echo
+-- echo -- Test window functions: FIRST_VALUE() / LAST_VALUE() / NTH_VALUE()
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t1 WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, FIRST_VALUE(embedding) OVER w AS first, NTH_VALUE(embedding, 2) OVER w AS second, LAST_VALUE(embedding) OVER w AS last FROM t1 WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
+
+-- echo
+-- echo -- Test window functions: ROW_NUMBER() / RANK() / DENSE_RANK()
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, ROW_NUMBER() OVER w AS 'row_num', RANK() OVER w AS 'rank', DENSE_RANK() OVER w AS 'dense_rank' FROM t1 WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, ROW_NUMBER() OVER w AS 'row_num', RANK() OVER w AS 'rank', DENSE_RANK() OVER w AS 'dense_rank' FROM t1 WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
+
+-- echo
+-- echo -- Test window functions: LAG() / LEAD()
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, LAG(embedding) OVER w AS 'lag', LEAD(embedding) OVER w AS 'lead' FROM t2 WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, LAG(embedding) OVER w AS 'lag', LEAD(embedding) OVER w AS 'lead' FROM t2 WINDOW w AS (ORDER BY embedding) ORDER BY embedding;
+
+-- echo
+-- echo -- Test window functions: COUNT(*)
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, COUNT(*) OVER (PARTITION BY embedding) AS cnt FROM t2 ORDER BY embedding;
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, COUNT(*) OVER (PARTITION BY embedding) AS cnt FROM t2 ORDER BY embedding;
+
+-- echo
+-- echo -- Test window functions: MAX()
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, MAX(embedding) OVER (ORDER BY embedding) AS max FROM t2 ORDER BY embedding;
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, MAX(embedding) OVER (ORDER BY embedding) AS max FROM t2 ORDER BY embedding;
+
+-- echo
+-- echo -- Test window functions: MIN()
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, MIN(embedding) OVER (ORDER BY embedding) AS max FROM t2 ORDER BY embedding;
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, MIN(embedding) OVER (ORDER BY embedding) AS max FROM t2 ORDER BY embedding;
+
+-- echo
+-- echo -- Test window functions: AVG()
+-- echo
+
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, AVG(embedding) OVER (ORDER BY embedding) AS avg FROM t2 ORDER BY embedding;
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, AVG(embedding) OVER (ORDER BY embedding) AS avg FROM t2 ORDER BY embedding;
+
+-- echo
+-- echo -- Test window functions: SUM()
+-- echo
+
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, SUM(embedding) OVER (ORDER BY embedding) AS avg FROM t2 ORDER BY embedding;
+-- error ER_UNKNOWN_ERROR
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, SUM(embedding) OVER (ORDER BY embedding) AS avg FROM t2 ORDER BY embedding;
+
+-- echo
+-- echo -- Test window function: PARTITION BY / ORDER BY
+-- echo
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, ROW_NUMBER() OVER (PARTITION BY embedding ORDER BY embedding) AS 'row_num' FROM t2 ORDER BY embedding;
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, ROW_NUMBER() OVER (PARTITION BY embedding ORDER BY embedding) AS 'row_num' FROM t2 ORDER BY embedding;

@@ -1,0 +1,237 @@
+SET @@GLOBAL.TIDB_ENABLE_VECTOR_TYPE = 1;
+
+-- Create a table with VECTOR type column and enable TiFlash replica.
+DROP TABLE IF EXISTS t;
+CREATE TABLE t (embedding VECTOR);
+INSERT INTO t VALUES ('[1,2,3]'), ('[4,5,6]'), ('[7,8,9]'), ('[]'), (NULL);
+
+-- Analyze the table.
+
+ANALYZE TABLE t;
+
+-- Add TiFlash replica.
+
+ALTER TABLE t SET TIFLASH REPLICA 1;
+SELECT SLEEP(60);
+SLEEP(60)
+0
+SELECT AVAILABLE, PROGRESS FROM INFORMATION_SCHEMA.TIFLASH_REPLICA WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('t') ORDER BY TABLE_NAME;
+AVAILABLE	PROGRESS
+1	1
+
+-- Test comparison functions/operators
+
+
+-- Test conversion operator: CAST()
+
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS BINARY);
+CAST(VEC_FROM_TEXT('[1,2,3]') AS BINARY)
+[1,2,3]
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS CHAR);
+CAST(VEC_FROM_TEXT('[1,2,3]') AS CHAR)
+[1,2,3]
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS JSON);
+Error 1105 (HY000): cannot cast from vector<float> to json
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS DECIMAL(2));
+Error 1105 (HY000): cannot cast from vector<float> to decimal
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS DOUBLE);
+Error 1105 (HY000): cannot cast from vector<float> to double
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS FLOAT);
+Error 1105 (HY000): cannot cast from vector<float> to float
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS REAL);
+Error 1105 (HY000): cannot cast from vector<float> to double
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS SIGNED);
+Error 1105 (HY000): cannot cast from vector<float> to bigint
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS UNSIGNED);
+Error 1105 (HY000): cannot cast from vector<float> to bigint
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS YEAR);
+Error 1105 (HY000): cannot cast from vector<float> to year
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS DATETIME);
+Error 1105 (HY000): cannot cast from vector<float> to datetime
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS DATE);
+Error 1105 (HY000): cannot cast from vector<float> to date
+SELECT CAST(VEC_FROM_TEXT('[1,2,3]') AS TIME);
+Error 1105 (HY000): cannot cast from vector<float> to time
+SELECT CAST('[1,2,3]' AS VECTOR);
+CAST('[1,2,3]' AS VECTOR)
+[1,2,3]
+SELECT CAST('[1,2,3]' AS VECTOR<FLOAT>);
+CAST('[1,2,3]' AS VECTOR<FLOAT>)
+[1,2,3]
+SELECT CAST('[1,2,3]' AS VECTOR<DOUBLE>);
+Error 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your TiDB version for the right syntax to use line 1 column 40 near ");"Only VECTOR<FLOAT> is supported for now 
+
+-- Test conversion function: CONVERT()
+
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), BINARY);
+CONVERT(VEC_FROM_TEXT('[1,2,3]'), BINARY)
+[1,2,3]
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), CHAR);
+CONVERT(VEC_FROM_TEXT('[1,2,3]'), CHAR)
+[1,2,3]
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), JSON);
+Error 1105 (HY000): cannot cast from vector<float> to json
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), DECIMAL);
+Error 1105 (HY000): cannot cast from vector<float> to decimal
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), DOUBLE);
+Error 1105 (HY000): cannot cast from vector<float> to double
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), FLOAT);
+Error 1105 (HY000): cannot cast from vector<float> to float
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), REAL);
+Error 1105 (HY000): cannot cast from vector<float> to double
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), SIGNED);
+Error 1105 (HY000): cannot cast from vector<float> to bigint
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), UNSIGNED);
+Error 1105 (HY000): cannot cast from vector<float> to bigint
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), YEAR);
+Error 1105 (HY000): cannot cast from vector<float> to year
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), DATETIME);
+Error 1105 (HY000): cannot cast from vector<float> to datetime
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), DATE);
+Error 1105 (HY000): cannot cast from vector<float> to date
+SELECT CONVERT(VEC_FROM_TEXT('[1,2,3]'), TIME);
+Error 1105 (HY000): cannot cast from vector<float> to time
+SELECT CONVERT('[1,2,3]', VECTOR);
+CONVERT('[1,2,3]', VECTOR)
+[1,2,3]
+SELECT CONVERT('[1,2,3]', VECTOR<FLOAT>);
+CONVERT('[1,2,3]', VECTOR<FLOAT>)
+[1,2,3]
+SELECT CONVERT('[1,2,3]', VECTOR<DOUBLE>);
+Error 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your TiDB version for the right syntax to use line 1 column 41 near ");"Only VECTOR<FLOAT> is supported for now 
+
+-- Test control flow functions
+
+
+-- Test control flow function: IF()
+
+SELECT IF(VEC_FROM_TEXT('[1, 2, 3]'), TRUE, FALSE) AS result;
+result
+1
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE IF(embedding, TRUE, FALSE);
+embedding
+[1,2,3]
+[4,5,6]
+[7,8,9]
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE IF(embedding, TRUE, FALSE);
+id	estRows	task	access object	operator info
+Selection_6	8.00	root	NULL	if(istrue_with_null(vector__functions_common.t.embedding), 1, 0)
+└─TableReader_8	10.00	root	NULL	data:TableFullScan_7
+  └─TableFullScan_7	10.00	cop[tikv]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE IF(embedding, TRUE, FALSE);
+embedding
+[1,2,3]
+[4,5,6]
+[7,8,9]
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE IF(embedding, TRUE, FALSE);
+id	estRows	task	access object	operator info
+Selection_9	8.00	root	NULL	if(istrue_with_null(vector__functions_common.t.embedding), 1, 0)
+└─TableReader_12	10.00	root	NULL	MppVersion:<num>, data:ExchangeSender_11
+  └─ExchangeSender_11	10.00	mpp[tiflash]	NULL	ExchangeType: PassThrough
+    └─TableFullScan_10	10.00	mpp[tiflash]	table:t	keep order:false
+
+SELECT IF(VEC_FROM_TEXT('[1,2,3]') = VEC_FROM_TEXT('[1,2,3]'), TRUE, FALSE) AS result;
+result
+1
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE IF(embedding = VEC_FROM_TEXT('[1,2,3]'), TRUE, FALSE);
+embedding
+[1,2,3]
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE IF(embedding = VEC_FROM_TEXT('[1,2,3]'), TRUE, FALSE);
+id	estRows	task	access object	operator info
+TableReader_8	8.00	root	NULL	data:Selection_7
+└─Selection_7	8.00	cop[tikv]	NULL	if(eq(vector__functions_common.t.embedding, [1,2,3]), 1, 0)
+  └─TableFullScan_6	10.00	cop[tikv]	table:t	keep order:false, stats:partial[embedding:allEvicted]
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE IF(embedding = VEC_FROM_TEXT('[1,2,3]'), TRUE, FALSE);
+embedding
+[1,2,3]
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE IF(embedding = VEC_FROM_TEXT('[1,2,3]'), TRUE, FALSE);
+id	estRows	task	access object	operator info
+TableReader_8	8.00	root	NULL	data:Selection_7
+└─Selection_7	8.00	cop[tiflash]	NULL	if(eq(vector__functions_common.t.embedding, [1,2,3]), 1, 0)
+  └─TableFullScan_6	10.00	cop[tiflash]	table:t	pushed down filter:empty, keep order:false
+
+SELECT IF(TRUE, VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]')) AS result;
+result
+[1,2,3]
+
+SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE IF(TRUE, embedding, VEC_FROM_TEXT('[4, 5, 6]'));
+embedding
+[1,2,3]
+[4,5,6]
+[7,8,9]
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ * FROM t WHERE IF(TRUE, embedding, VEC_FROM_TEXT('[4, 5, 6]'));
+id	estRows	task	access object	operator info
+TableReader_8	8.00	root	NULL	data:Selection_7
+└─Selection_7	8.00	cop[tikv]	NULL	vector__functions_common.t.embedding
+  └─TableFullScan_6	10.00	cop[tikv]	table:t	keep order:false
+
+SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE IF(TRUE, embedding, VEC_FROM_TEXT('[4, 5, 6]'));
+embedding
+[1,2,3]
+[4,5,6]
+[7,8,9]
+EXPLAIN SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ * FROM t WHERE IF(TRUE, embedding, VEC_FROM_TEXT('[4, 5, 6]'));
+id	estRows	task	access object	operator info
+TableReader_8	8.00	root	NULL	data:Selection_7
+└─Selection_7	8.00	cop[tiflash]	NULL	vector__functions_common.t.embedding
+  └─TableFullScan_6	10.00	cop[tiflash]	table:t	pushed down filter:empty, keep order:false
+
+-- Test control flow function: IFNULL()
+
+SELECT IFNULL(VEC_FROM_TEXT('[1, 2, 3]'), 1) AS result;
+result
+[1,2,3]
+
+SELECT IFNULL(NULL, VEC_FROM_TEXT('[1, 2, 3]')) AS result;
+result
+[1,2,3]
+
+-- Test control flow function: NULLIF()
+
+SELECT NULLIF(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[1, 2, 3]')) AS result;
+result
+NULL
+
+SELECT NULLIF(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]')) AS result;
+result
+[1,2,3]
+
+-- Test flow function operator: CASE WHEN
+
+SELECT CASE WHEN TRUE THEN VEC_FROM_TEXT('[1, 2, 3]') ELSE VEC_FROM_TEXT('[4, 5, 6]') END AS result;
+result
+[1,2,3]
+
+-- Test comparison functions
+
+
+-- Test comparison function: GREATEST()
+
+SELECT GREATEST(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]'), VEC_FROM_TEXT('[7, 8, 9]')) AS result;
+result
+[7,8,9]
+
+-- Test comparison function: LEAST()
+
+SELECT LEAST(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]'), VEC_FROM_TEXT('[7, 8, 9]')) AS result;
+result
+[1,2,3]
+
+-- Test comparison function: COALESCE()
+
+SELECT COALESCE(VEC_FROM_TEXT('[1, 2, 3]'), VEC_FROM_TEXT('[4, 5, 6]')) AS result;
+result
+[1,2,3]
+SELECT COALESCE(NULL, VEC_FROM_TEXT('[1, 2, 3]')) AS result;
+result
+[1,2,3]
+SELECT COALESCE(VEC_FROM_TEXT('[1, 2, 3]'), 1) AS result;
+result
+[1,2,3]
+SELECT COALESCE(VEC_FROM_TEXT('[1, 2, 3]'), '1') AS result;
+result
+[1,2,3]
