@@ -229,7 +229,6 @@ Sort	6.00	root	NULL	Column#3
       └─TableFullScan	6.00	mpp[tiflash]	table:t	keep order:false
 
 
--- FIXME: the behavior to handle VEC_L2_DISTANCE(embedding, NULL) is different
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L2_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
 embedding	d
 [1.1,2.2,3.3]	NULL
@@ -237,7 +236,10 @@ embedding	d
 [7.7,8.8,9.9]	NULL
 
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L2_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
-Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 0, e.what() = DB::Exception,
+embedding	d
+[1.1,2.2,3.3]	NULL
+[4.4,5.5,6.6]	NULL
+[7.7,8.8,9.9]	NULL
 
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;
@@ -294,14 +296,17 @@ Sort	6.00	root	NULL	Column#3
       └─TableFullScan	6.00	mpp[tiflash]	table:t	keep order:false
 
 
--- FIXME: the behavior to handle VEC_NEGATIVE_INNER_PRODUCT(embedding, NULL) is different
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, NULL) AS d FROM t ORDER BY d;
 embedding	d
 [1.1,2.2,3.3]	NULL
 [4.4,5.5,6.6]	NULL
 [7.7,8.8,9.9]	NULL
+
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, NULL) AS d FROM t ORDER BY d;
-Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 0, e.what() = DB::Exception,
+embedding	d
+[1.1,2.2,3.3]	NULL
+[4.4,5.5,6.6]	NULL
+[7.7,8.8,9.9]	NULL
 
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[]') AS d FROM t ORDER BY d;
@@ -403,14 +408,17 @@ Sort	6.00	root	NULL	Column#3
       └─TableFullScan	6.00	mpp[tiflash]	table:t	keep order:false
 
 
--- FIXME: the behavior to handle VEC_COSINE_DISTANCE(embedding, NULL) is different
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
 embedding	d
 [1.1,2.2,3.3]	NULL
 [4.4,5.5,6.6]	NULL
 [7.7,8.8,9.9]	NULL
+
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
-Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 0, e.what() = DB::Exception,
+embedding	d
+[1.1,2.2,3.3]	NULL
+[4.4,5.5,6.6]	NULL
+[7.7,8.8,9.9]	NULL
 
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;
@@ -490,14 +498,17 @@ Sort	6.00	root	NULL	Column#3
       └─TableFullScan	6.00	mpp[tiflash]	table:t	keep order:false
 
 
--- FIXME: the behavior to handle VEC_L1_DISTANCE(embedding, NULL) is different
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L1_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
 embedding	d
 [1.1,2.2,3.3]	NULL
 [4.4,5.5,6.6]	NULL
 [7.7,8.8,9.9]	NULL
+
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L1_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
-Error 1105 (HY000): other error for mpp stream: Code: 36, e.displayText() = DB::Exception: vectors have different dimensions: 3 and 0, e.what() = DB::Exception,
+embedding	d
+[1.1,2.2,3.3]	NULL
+[4.4,5.5,6.6]	NULL
+[7.7,8.8,9.9]	NULL
 
 
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[]') AS d FROM t ORDER BY d;

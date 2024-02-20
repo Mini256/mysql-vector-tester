@@ -139,10 +139,8 @@ SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L2_DISTANCE(embedding
 EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L2_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
 -- echo
 -- echo
--- echo -- FIXME: the behavior to handle VEC_L2_DISTANCE(embedding, NULL) is different
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L2_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
 -- echo
--- error ER_UNKNOWN_ERROR
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L2_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
 -- echo
 -- echo
@@ -183,9 +181,8 @@ SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUC
 EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
 -- echo
 -- echo
--- echo -- FIXME: the behavior to handle VEC_NEGATIVE_INNER_PRODUCT(embedding, NULL) is different
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, NULL) AS d FROM t ORDER BY d;
--- error ER_UNKNOWN_ERROR
+-- echo
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_NEGATIVE_INNER_PRODUCT(embedding, NULL) AS d FROM t ORDER BY d;
 -- echo
 -- echo
@@ -250,9 +247,8 @@ SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_COSINE_DISTANCE(embed
 EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
 -- echo
 -- echo
--- echo -- FIXME: the behavior to handle VEC_COSINE_DISTANCE(embedding, NULL) is different
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
--- error ER_UNKNOWN_ERROR
+-- echo
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_COSINE_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
 -- echo
 -- echo
@@ -304,9 +300,8 @@ SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L1_DISTANCE(embedding
 EXPLAIN FORMAT='brief' SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L1_DISTANCE(embedding, '[5,5,5]') AS d FROM t ORDER BY d;
 -- echo
 -- echo
--- echo -- FIXME: the behavior to handle VEC_L1_DISTANCE(embedding, NULL) is different
 SELECT /*+ READ_FROM_STORAGE(TIKV[t]) */ embedding, VEC_L1_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
--- error ER_UNKNOWN_ERROR
+-- echo
 SELECT /*+ READ_FROM_STORAGE(TIFLASH[t]) */ embedding, VEC_L1_DISTANCE(embedding, NULL) AS d FROM t ORDER BY d;
 -- echo
 -- echo
